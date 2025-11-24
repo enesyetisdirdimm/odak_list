@@ -1,0 +1,47 @@
+name: odak_list
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- UYUMLU PAKET LİSTESİ ---
+  
+  # sqflite 2.3.0 yerine 2.3.2 sürümünü kullanıyoruz (Daha kararlı)
+  sqflite: ^2.3.2
+  
+  path: ^1.9.0
+  intl: ^0.19.0
+  
+  # Bildirimler için güvenli sürüm
+  flutter_local_notifications: ^17.1.0
+  
+  timezone: ^0.9.2
+  
+  # Timezone hatasını çözen sürüm
+  flutter_timezone: ^3.0.1 
+  
+  # path_provider SDK 34 ile uyumlu sürüm
+  path_provider: ^2.1.2
+  
+  cupertino_icons: ^1.0.2
+
+# --- SORUN ÇÖZÜCÜ KISIM ---
+dependency_overrides:
+  # Android SDK 34 (Android 14) ile uyumlu çalışması için
+  # bu özel versiyonları zorluyoruz:
+  path_provider_android: 2.2.5
+  sqflite_android: 2.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
