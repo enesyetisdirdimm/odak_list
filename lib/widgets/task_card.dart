@@ -1,9 +1,10 @@
-// lib/widgets/task_card.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/utils/app_colors.dart';
 import 'package:odak_list/utils/app_styles.dart';
+import 'package:provider/provider.dart'; // Provider
+import 'package:odak_list/theme_provider.dart'; // Tema
 
 class TaskCard extends StatelessWidget {
   final Task task;
@@ -19,66 +20,67 @@ class TaskCard extends StatelessWidget {
     required this.onTap,
   });
 
-  // YENİ: Aciliyet rengini belirleyen yardımcı metot
   Color _getPriorityColor(int priority) {
     switch (priority) {
-      case 2:
-        return AppColors.priorityHigh;
-      case 1:
-        return AppColors.priorityMedium;
-      case 0:
-        return AppColors.priorityLow;
-      default:
-        return Colors.grey;
+      case 2: return AppColors.priorityHigh;
+      case 1: return AppColors.priorityMedium;
+      case 0: return AppColors.priorityLow;
+      default: return Colors.grey;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final Color categoryColor = categories[task.category] ?? Colors.grey;
-    final Color priorityColor = _getPriorityColor(task.priority); // <-- YENİ
+    // --- DÜZELTME: Rengi buradan çekiyoruz ---
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = Theme.of(context).cardColor;
+    final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final subTextColor = isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    final bool hasTime = task.dueDate != null &&
-        (task.dueDate!.hour != 0 || task.dueDate!.minute != 0);
+    final Color categoryColor = categories[task.category] ?? Colors.grey;
+    final Color priorityColor = _getPriorityColor(task.priority);
+
+    final bool hasTime = task.dueDate != null && (task.dueDate!.hour != 0 || task.dueDate!.minute != 0);
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.cardBackground,
+          color: cardColor,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: AppStyles.softShadow,
-          // YENİ: Sol kenara renkli aciliyet çizgisi
-          border: Border(
-            left: BorderSide(
-              color: priorityColor,
-              width: 5,
-            ),
-          ),
+          boxShadow: isDarkMode ? [] : AppStyles.softShadow,
+          border: isDarkMode ? Border.all(color: Colors.white10) : null,
         ),
         child: Row(
           children: [
-            const SizedBox(width: 8), // Renkli kenarlık için boşluk
-            // Checkbox
+            // --- Checkbox (Kutucuk) ---
             GestureDetector(
               onTap: onToggleDone,
-              child: Container(
-                width: 24,
-                height: 24,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  color: task.isDone ? categoryColor : Colors.transparent,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: categoryColor, width: 2),
+                  // Seçili ise MAVİ (seçilen renk), değilse transparan
+                  color: task.isDone ? themeProvider.secondaryColor : Colors.transparent,
+                  border: Border.all(
+                    // Kenarlık rengi de dinamik
+                    color: task.isDone ? themeProvider.secondaryColor : (isDarkMode ? Colors.grey : Colors.grey.shade400),
+                    width: 2,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: task.isDone
-                    ? const Icon(Icons.check, color: Colors.white, size: 16)
+                    ? const Icon(Icons.check, size: 18, color: Colors.white)
                     : null,
               ),
             ),
             const SizedBox(width: 16),
-            // Görev Başlığı ve Kategori
+            
+            // İçerik
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -87,34 +89,38 @@ class TaskCard extends StatelessWidget {
                     task.title,
                     style: TextStyle(
                       fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: task.isDone
-                          ? AppColors.textSecondary
-                          : AppColors.textPrimary,
-                      decoration: task.isDone
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.none,
+                      fontWeight: FontWeight.bold,
+                      color: task.isDone ? subTextColor : textColor,
+                      decoration: task.isDone ? TextDecoration.lineThrough : null,
+                      decorationColor: subTextColor,
                     ),
                   ),
-                  if (task.category != null)
-                    Chip(
-                      label: Text(
-                        task.category!,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white,
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: categoryColor.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          task.category != null && task.category!.isNotEmpty ? task.category! : 'Genel',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: categoryColor,
+                          ),
                         ),
                       ),
-                      backgroundColor: categoryColor,
-                      padding: const EdgeInsets.all(0),
-                      labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-                      visualDensity: VisualDensity.compact,
-                    ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.circle, size: 8, color: priorityColor),
+                    ],
+                  ),
                 ],
               ),
             ),
-            const SizedBox(width: 16),
+            
             // Tarih ve Saat
             if (task.dueDate != null)
               Column(
@@ -122,17 +128,17 @@ class TaskCard extends StatelessWidget {
                 children: [
                   Text(
                     DateFormat('dd').format(task.dueDate!),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary,
+                      color: task.isDone ? subTextColor : textColor,
                     ),
                   ),
                   Text(
-                    DateFormat('MMM').format(task.dueDate!).toUpperCase(),
-                    style: const TextStyle(
+                    DateFormat('MMM', 'tr_TR').format(task.dueDate!).toUpperCase(),
+                    style: TextStyle(
                       fontSize: 12,
-                      color: AppColors.textSecondary,
+                      color: subTextColor,
                     ),
                   ),
                   if (hasTime)
@@ -140,10 +146,11 @@ class TaskCard extends StatelessWidget {
                       padding: const EdgeInsets.only(top: 4.0),
                       child: Text(
                         DateFormat('HH:mm').format(task.dueDate!),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.primaryGradientEnd,
+                          // --- DÜZELTME: Saat rengi de dinamik ---
+                          color: themeProvider.secondaryColor,
                         ),
                       ),
                     ),

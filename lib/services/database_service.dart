@@ -1,3 +1,4 @@
+import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
@@ -18,7 +19,8 @@ class DatabaseService {
 
   Future<Database> _initDB() async {
     final documentsDirectory = await getApplicationDocumentsDirectory();
-    final path = join(documentsDirectory.path, 'odaklist_v2.db'); // İsim değiştirdim ki temiz başlasın
+    // Yeni yapı için ismini değiştirdim, temiz başlasın.
+    final path = join(documentsDirectory.path, 'odak_pro_v1.db'); 
 
     return await openDatabase(
       path,
@@ -28,6 +30,16 @@ class DatabaseService {
   }
 
   Future<void> _onCreate(Database db, int version) async {
+    // PROJELER TABLOSU
+    await db.execute('''
+      CREATE TABLE projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        colorValue INTEGER NOT NULL
+      )
+    ''');
+
+    // GÖREVLER TABLOSU (projectId eklendi)
     await db.execute('''
       CREATE TABLE tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,18 +49,53 @@ class DatabaseService {
         category TEXT,
         priority INTEGER NOT NULL DEFAULT 1,
         notes TEXT,
-        subTasksJson TEXT
+        subTasksJson TEXT,
+        projectId INTEGER
       )
     ''');
+
+    // Varsayılan bir "Genel" projesi ekleyelim ki kullanıcı boş ekran görmesin
+    await db.insert('projects', {
+      'title': 'Genel', 
+      'colorValue': 0xFF42A5F5 // Mavi
+    });
   }
+
+  // --- PROJE İŞLEMLERİ ---
+
+  Future<int> createProject(Project project) async {
+    final db = await database;
+    return await db.insert('projects', project.toMap());
+  }
+
+  Future<void> deleteProject(int id) async {
+    final db = await database;
+    await db.delete('projects', where: 'id = ?', whereArgs: [id]);
+    // Proje silinince görevleri de silinsin mi? Şimdilik "Genel" yapalım veya silelim.
+    // Biz görevleri silmeyi tercih edelim:
+    await db.delete('tasks', where: 'projectId = ?', whereArgs: [id]);
+  }
+
+  // Bu fonksiyon çok önemli: Projeleri ve istatistiklerini getirir
+  Future<List<Project>> getProjectsWithStats() async {
+    final db = await database;
+    final List<Map<String, dynamic>> result = await db.rawQuery('''
+      SELECT 
+        p.id, 
+        p.title, 
+        p.colorValue,
+        (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id) as taskCount,
+        (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDone = 1) as completedTaskCount
+      FROM projects p
+    ''');
+    return List.generate(result.length, (i) => Project.fromMap(result[i]));
+  }
+
+  // --- GÖREV İŞLEMLERİ ---
 
   Future<Task> createTask(Task task) async {
     final db = await database;
-    final id = await db.insert(
-      'tasks',
-      task.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    final id = await db.insert('tasks', task.toMap());
     task.id = id;
     return task;
   }
@@ -57,7 +104,19 @@ class DatabaseService {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'tasks',
-      orderBy: 'isDone ASC, priority DESC, dueDate ASC', // Yapılmamışlar ve öncelikliler üstte
+      orderBy: 'isDone ASC, priority DESC, dueDate ASC',
+    );
+    return List.generate(maps.length, (i) => Task.fromMap(maps[i]));
+  }
+
+  // Sadece belirli projenin görevlerini getir
+  Future<List<Task>> getTasksByProject(int projectId) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'tasks',
+      where: 'projectId = ?',
+      whereArgs: [projectId],
+      orderBy: 'isDone ASC, priority DESC',
     );
     return List.generate(maps.length, (i) => Task.fromMap(maps[i]));
   }
@@ -74,10 +133,6 @@ class DatabaseService {
 
   Future<void> deleteTask(int id) async {
     final db = await database;
-    await db.delete(
-      'tasks',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.delete('tasks', where: 'id = ?', whereArgs: [id]);
   }
 }

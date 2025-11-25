@@ -30,6 +30,10 @@ dependencies:
   path_provider: ^2.1.2
   
   cupertino_icons: ^1.0.2
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
+  table_calendar: ^3.0.9
+  fl_chart: ^0.66.0
 
 # --- SORUN ÇÖZÜCÜ KISIM ---
 dependency_overrides:
@@ -37,6 +41,7 @@ dependency_overrides:
   # bu özel versiyonları zorluyoruz:
   path_provider_android: 2.2.5
   sqflite_android: 2.4.1
+  shared_preferences_android: 2.3.2
 
 dev_dependencies:
   flutter_test:

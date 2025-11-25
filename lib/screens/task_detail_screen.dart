@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/sub_task.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:odak_list/theme_provider.dart';
 
 class TaskDetailScreen extends StatefulWidget {
   final Task task;
@@ -23,16 +26,15 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   
   late Task _tempTask;
   final NotificationService _notificationService = NotificationService();
-
-  // Öncelikler
   final Map<int, String> _priorities = {2: 'Yüksek', 1: 'Normal', 0: 'Düşük'};
-  // Kategoriler
-  final List<String> _categoryList = ['İş', 'Ev', 'Okul', 'Kişisel'];
+  
+  List<Project> _projects = []; // Projeleri buraya çekeceğiz
 
   @override
   void initState() {
     super.initState();
-    // Task'ın kopyasını oluşturma (Referans hatasını önlemek için)
+    _loadProjects(); // Projeleri yükle
+
     _tempTask = Task(
       id: widget.task.id,
       title: widget.task.title,
@@ -41,12 +43,24 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       category: widget.task.category,
       priority: widget.task.priority,
       notes: widget.task.notes,
+      projectId: widget.task.projectId, // Proje ID'sini al
       subTasks: List.from(widget.task.subTasks),
     );
 
     _titleController = TextEditingController(text: _tempTask.title);
     _notesController = TextEditingController(text: _tempTask.notes);
     _subTaskController = TextEditingController();
+  }
+
+  Future<void> _loadProjects() async {
+    final projects = await widget.dbService.getProjectsWithStats();
+    setState(() {
+      _projects = projects;
+      // Eğer proje seçili değilse ve proje listesi doluysa ilkini seç
+      if (_tempTask.projectId == null && _projects.isNotEmpty) {
+        _tempTask.projectId = _projects.first.id;
+      }
+    });
   }
 
   @override
@@ -64,34 +78,25 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       firstDate: DateTime.now().subtract(const Duration(days: 365)),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
     );
-
     if (date == null) return;
-
     if (!mounted) return;
 
     final TimeOfDay? time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(_tempTask.dueDate ?? DateTime.now()),
     );
-
     if (time == null) return;
 
     setState(() {
       _tempTask.dueDate = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
+        date.year, date.month, date.day, time.hour, time.minute,
       );
     });
   }
 
   void _saveTask() async {
     if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lütfen görev başlığı giriniz')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Başlık giriniz')));
       return;
     }
 
@@ -99,9 +104,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     _tempTask.notes = _notesController.text.trim();
 
     if (_tempTask.id == null) {
-      // Yeni Kayıt
       Task createdTask = await widget.dbService.createTask(_tempTask);
-      // Bildirim kur
       if (createdTask.dueDate != null && createdTask.dueDate!.isAfter(DateTime.now())) {
         await _notificationService.scheduleNotification(
           id: createdTask.id!,
@@ -111,9 +114,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         );
       }
     } else {
-      // Güncelleme
       await widget.dbService.updateTask(_tempTask);
-      // Eski bildirimi iptal et, yenisini kur (basitlik için)
       await _notificationService.cancelNotification(_tempTask.id!);
       if (_tempTask.dueDate != null && _tempTask.dueDate!.isAfter(DateTime.now())) {
         await _notificationService.scheduleNotification(
@@ -124,9 +125,8 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         );
       }
     }
-
     if (!mounted) return;
-    Navigator.pop(context); // Geri dön
+    Navigator.pop(context);
   }
 
   void _deleteTask() async {
@@ -140,13 +140,19 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final iconColor = isDarkMode ? AppColors.textSecondaryDark : Colors.black;
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: bgColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.black),
+          icon: Icon(Icons.close, color: iconColor),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
@@ -157,7 +163,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
             ),
           TextButton(
             onPressed: _saveTask,
-            child: const Text("KAYDET", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            child: Text("KAYDET", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: themeProvider.secondaryColor)),
           )
         ],
       ),
@@ -166,61 +172,73 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Başlık
             TextField(
               controller: _titleController,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor),
+              decoration: InputDecoration(
                 hintText: 'Ne yapılması gerekiyor?',
+                hintStyle: TextStyle(color: isDarkMode ? Colors.grey : Colors.grey.shade400),
                 border: InputBorder.none,
               ),
             ),
             const SizedBox(height: 20),
-
-            // Tarih ve Saat Seçimi
+            
+            // Tarih Seçimi
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.calendar_today, color: AppColors.primaryGradientStart),
+              leading: Icon(Icons.calendar_today, color: themeProvider.primaryColor),
               title: Text(
                 _tempTask.dueDate == null
                     ? 'Tarih ve Saat Ekle'
                     : DateFormat('dd MMMM yyyy, HH:mm').format(_tempTask.dueDate!),
                 style: TextStyle(
-                  color: _tempTask.dueDate == null ? Colors.grey : Colors.black,
+                  color: _tempTask.dueDate == null ? Colors.grey : textColor,
                   fontWeight: FontWeight.w500,
                 ),
               ),
               onTap: _pickDateTime,
               trailing: _tempTask.dueDate != null 
-                  ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _tempTask.dueDate = null)) 
+                  ? IconButton(icon: Icon(Icons.clear, color: iconColor), onPressed: () => setState(() => _tempTask.dueDate = null)) 
                   : null,
             ),
-            const Divider(),
-
-            // Kategori ve Öncelik Yan Yana
+            Divider(color: Colors.grey.withOpacity(0.3)),
+            
+            // PROJE VE ÖNCELİK SEÇİMİ
             Row(
               children: [
+                // PROJE DROPDOWN (Kategori yerine)
                 Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _categoryList.contains(_tempTask.category) ? _tempTask.category : null,
-                    decoration: const InputDecoration(labelText: "Kategori", border: InputBorder.none),
-                    items: _categoryList.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                    onChanged: (val) => setState(() => _tempTask.category = val),
+                  child: DropdownButtonFormField<int>(
+                    dropdownColor: isDarkMode ? AppColors.cardDark : Colors.white,
+                    value: _tempTask.projectId,
+                    decoration: const InputDecoration(labelText: "Proje", border: InputBorder.none),
+                    items: _projects.map((p) => DropdownMenuItem(
+                      value: p.id, 
+                      child: Row(
+                        children: [
+                          Icon(Icons.circle, size: 12, color: Color(p.colorValue)),
+                          const SizedBox(width: 8),
+                          Text(p.title, style: TextStyle(color: textColor)),
+                        ],
+                      )
+                    )).toList(),
+                    onChanged: (val) => setState(() => _tempTask.projectId = val),
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: DropdownButtonFormField<int>(
+                    dropdownColor: isDarkMode ? AppColors.cardDark : Colors.white,
                     value: _tempTask.priority,
                     decoration: const InputDecoration(labelText: "Öncelik", border: InputBorder.none),
-                    items: _priorities.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+                    items: _priorities.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, style: TextStyle(color: textColor)))).toList(),
                     onChanged: (val) => setState(() => _tempTask.priority = val ?? 1),
                   ),
                 ),
               ],
             ),
-            const Divider(),
-
+            Divider(color: Colors.grey.withOpacity(0.3)),
+            
             // Alt Görevler
             const Text("Alt Görevler", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
             Row(
@@ -228,11 +246,12 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                 Expanded(
                   child: TextField(
                     controller: _subTaskController,
+                    style: TextStyle(color: textColor),
                     decoration: const InputDecoration(hintText: "Alt görev ekle...", border: InputBorder.none),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.add_circle, color: AppColors.primaryGradientEnd),
+                  icon: Icon(Icons.add_circle, color: themeProvider.secondaryColor),
                   onPressed: () {
                     if (_subTaskController.text.trim().isNotEmpty) {
                       setState(() {
@@ -245,25 +264,31 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
               ],
             ),
             ..._tempTask.subTasks.map((sub) => CheckboxListTile(
-              title: Text(sub.title, style: TextStyle(decoration: sub.isDone ? TextDecoration.lineThrough : null)),
+              title: Text(sub.title, style: TextStyle(
+                color: textColor,
+                decoration: sub.isDone ? TextDecoration.lineThrough : null
+              )),
               value: sub.isDone,
+              activeColor: themeProvider.secondaryColor,
+              checkColor: Colors.white,
               onChanged: (val) {
                 setState(() => sub.isDone = val ?? false);
               },
               secondary: IconButton(
-                icon: const Icon(Icons.delete_outline, size: 20),
+                icon: Icon(Icons.delete_outline, size: 20, color: iconColor),
                 onPressed: () => setState(() => _tempTask.subTasks.remove(sub)),
               ),
               controlAffinity: ListTileControlAffinity.leading,
               contentPadding: EdgeInsets.zero,
             )),
             
-            const Divider(),
+            Divider(color: Colors.grey.withOpacity(0.3)),
             // Notlar
             const Text("Notlar", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
             TextField(
               controller: _notesController,
               maxLines: 3,
+              style: TextStyle(color: textColor),
               decoration: const InputDecoration(
                 hintText: 'Detaylı açıklama ekle...',
                 border: InputBorder.none,

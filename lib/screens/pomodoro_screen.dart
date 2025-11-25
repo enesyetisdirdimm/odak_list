@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
+import 'package:provider/provider.dart'; // Provider
+import 'package:odak_list/theme_provider.dart'; // Tema
 
 class PomodoroScreen extends StatefulWidget {
   const PomodoroScreen({super.key});
@@ -11,7 +13,6 @@ class PomodoroScreen extends StatefulWidget {
 }
 
 class _PomodoroScreenState extends State<PomodoroScreen> {
-  // Süre Tanımları (Saniye cinsinden)
   static const int focusTime = 25 * 60;
   static const int shortBreakTime = 5 * 60;
   static const int longBreakTime = 15 * 60;
@@ -48,9 +49,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   void _finishTimer() {
     _timer?.cancel();
     setState(() => isRunning = false);
-
     NotificationService().showInstantNotification(); 
-    
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -92,36 +91,40 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // --- DÜZELTME: Tema Rengi ---
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
+    
+    final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final subTextColor = isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+
     double progress = remainingSeconds / initialSeconds;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      // DÜZELTME: SafeArea widget'ı eklendi.
-      // Bu widget, içeriği çentik ve sistem barlarından korur.
+      backgroundColor: bgColor,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Üst Kısım: Mod Seçimi
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _buildModeButton('Odaklan', focusTime),
+                    _buildModeButton('Odaklan', focusTime, isDarkMode, themeProvider),
                     const SizedBox(width: 10),
-                    _buildModeButton('Kısa Mola', shortBreakTime),
+                    _buildModeButton('Kısa Mola', shortBreakTime, isDarkMode, themeProvider),
                     const SizedBox(width: 10),
-                    _buildModeButton('Uzun Mola', longBreakTime),
+                    _buildModeButton('Uzun Mola', longBreakTime, isDarkMode, themeProvider),
                   ],
                 ),
               ),
               
               const Spacer(),
 
-              // Orta Kısım: Sayaç
               Stack(
                 alignment: Alignment.center,
                 children: [
@@ -131,11 +134,12 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                     child: CircularProgressIndicator(
                       value: progress,
                       strokeWidth: 20,
-                      backgroundColor: Colors.grey.shade300,
+                      backgroundColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300,
+                      // --- DÜZELTME: Sayaç rengi ---
                       valueColor: AlwaysStoppedAnimation<Color>(
                         currentMode == 'Odaklan' 
-                            ? AppColors.primaryGradientStart 
-                            : AppColors.categoryHome,
+                            ? themeProvider.secondaryColor // SEÇİLEN RENK
+                            : AppColors.categoryHome, // Mola yeşil kalsın veya değişsin
                       ),
                     ),
                   ),
@@ -144,17 +148,17 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                     children: [
                       Text(
                         timerText,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 60,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
+                          color: textColor,
                         ),
                       ),
                       Text(
                         currentMode,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 18,
-                          color: AppColors.textSecondary,
+                          color: subTextColor,
                           fontWeight: FontWeight.w500
                         ),
                       ),
@@ -165,7 +169,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
               const Spacer(),
 
-              // Alt Kısım: Butonlar
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -173,7 +176,8 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                     onPressed: toggleTimer,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-                      backgroundColor: isRunning ? AppColors.priorityHigh : AppColors.primaryGradientEnd,
+                      // --- DÜZELTME: Buton Rengi ---
+                      backgroundColor: isRunning ? AppColors.priorityHigh : themeProvider.secondaryColor,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     ),
                     child: Text(
@@ -184,11 +188,11 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                   const SizedBox(width: 20),
                   IconButton(
                     onPressed: resetTimer,
-                    icon: const Icon(Icons.refresh, size: 32, color: AppColors.textSecondary),
+                    icon: Icon(Icons.refresh, size: 32, color: subTextColor),
                   ),
                 ],
               ),
-              const SizedBox(height: 20), // Alt boşluk
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -196,31 +200,28 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     );
   }
 
-  Widget _buildModeButton(String mode, int time) {
+  Widget _buildModeButton(String mode, int time, bool isDarkMode, ThemeProvider themeProvider) {
     bool isSelected = currentMode == mode;
+    Color textColor = isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    
     return GestureDetector(
       onTap: () => changeMode(mode, time),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
+          color: isSelected ? (isDarkMode ? Colors.grey.shade800 : Colors.white) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? AppColors.primaryGradientStart : Colors.transparent,
+            // --- DÜZELTME: Kenarlık Rengi ---
+            color: isSelected ? themeProvider.primaryColor : Colors.transparent,
             width: 2
           ),
-          boxShadow: isSelected ? [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4)
-            )
-          ] : [],
         ),
         child: Text(
           mode,
           style: TextStyle(
-            color: isSelected ? AppColors.primaryGradientStart : AppColors.textSecondary,
+            // --- DÜZELTME: Metin Rengi ---
+            color: isSelected ? themeProvider.primaryColor : textColor,
             fontWeight: FontWeight.bold,
           ),
         ),

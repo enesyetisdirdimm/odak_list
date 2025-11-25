@@ -9,6 +9,7 @@ class Task {
   String? category;
   int priority;
   String? notes;
+  int? projectId; // <-- YENİ: Proje Bağlantısı
   List<SubTask> subTasks;
 
   Task({
@@ -19,6 +20,7 @@ class Task {
     this.category,
     this.priority = 1,
     this.notes,
+    this.projectId, // <-- YENİ
     List<SubTask>? subTasks,
   }) : subTasks = subTasks ?? [];
 
@@ -31,20 +33,19 @@ class Task {
       'category': category,
       'priority': priority,
       'notes': notes,
-      // Listeyi JSON string'e çevirip kaydediyoruz
+      'projectId': projectId, // <-- YENİ
       'subTasksJson': jsonEncode(subTasks.map((e) => e.toMap()).toList()),
     };
   }
 
   factory Task.fromMap(Map<String, dynamic> map) {
-    // Alt görevleri güvenli şekilde parse etme
     List<SubTask> loadedSubTasks = [];
     if (map['subTasksJson'] != null) {
       try {
         final List<dynamic> decoded = jsonDecode(map['subTasksJson']);
         loadedSubTasks = decoded.map((e) => SubTask.fromMap(e)).toList();
       } catch (e) {
-        print("Alt görevler parse edilirken hata: $e");
+        print("Hata: $e");
       }
     }
 
@@ -56,6 +57,7 @@ class Task {
       category: map['category'],
       priority: map['priority'] ?? 1,
       notes: map['notes'],
+      projectId: map['projectId'], // <-- YENİ
       subTasks: loadedSubTasks,
     );
   }
