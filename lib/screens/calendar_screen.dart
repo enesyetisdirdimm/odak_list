@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/screens/task_detail_screen.dart';
 import 'package:odak_list/services/database_service.dart';
-import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/theme_provider.dart';
+import 'package:odak_list/task_provider.dart'; // YENİ: Veri Akışı
 import 'package:odak_list/utils/app_colors.dart';
+import 'package:odak_list/utils/app_styles.dart'; // Stil dosyası
 import 'package:odak_list/widgets/task_card.dart';
 import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -22,37 +23,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
   
-  List<Task> _allTasks = [];
-  // Seçilen güne ait görevleri tutacak liste
-  ValueNotifier<List<Task>> _selectedEvents = ValueNotifier([]);
-
   @override
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
-    _loadTasks();
   }
 
-  Future<void> _loadTasks() async {
-    final tasks = await widget.dbService.getTasks();
-    setState(() {
-      _allTasks = tasks;
-      _selectedEvents.value = _getTasksForDay(_selectedDay!);
-    });
-  }
-
-  // Belirli bir güne ait görevleri filtreleyen fonksiyon
-  List<Task> _getTasksForDay(DateTime day) {
-    return _allTasks.where((task) {
+  // Belirli bir günün görevlerini Provider listesinden süzer
+  List<Task> _getTasksForDay(DateTime day, List<Task> allTasks) {
+    return allTasks.where((task) {
       if (task.dueDate == null) return false;
       return isSameDay(task.dueDate, day);
     }).toList();
-  }
-
-  Future<void> _toggleTaskStatus(Task task) async {
-    task.isDone = !task.isDone;
-    await widget.dbService.updateTask(task);
-    _loadTasks(); // Listeyi yenile
   }
 
   void _navigateToDetail(Task task) async {
@@ -65,30 +47,37 @@ class _CalendarScreenState extends State<CalendarScreen> {
         ),
       ),
     );
-    _loadTasks();
+    // Geri dönünce veriyi yenile (Provider sayesinde otomatik olacak ama garanti olsun)
+    if(mounted) context.read<TaskProvider>().loadData();
   }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    // Veriyi anlık dinliyoruz (listen: true varsayılandır)
+    final taskProvider = Provider.of<TaskProvider>(context); 
+    
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
+
+    // Tüm görevleri al
+    final allTasks = taskProvider.tasks;
+    // Seçili günün görevlerini filtrele
+    final selectedEvents = _getTasksForDay(_selectedDay!, allTasks);
 
     return Scaffold(
       backgroundColor: bgColor,
       body: SafeArea(
         child: Column(
           children: [
-            // --- TAKVİM BÖLÜMÜ ---
+            // --- TAKVİM ---
             Container(
               margin: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(20),
-                boxShadow: isDarkMode ? [] : [
-                  BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
-                ],
+                boxShadow: isDarkMode ? [] : AppStyles.softShadow, // AppStyles kullanıldı
               ),
               child: TableCalendar<Task>(
                 firstDay: DateTime.utc(2020, 1, 1),
@@ -107,17 +96,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 calendarStyle: CalendarStyle(
                   defaultTextStyle: TextStyle(color: textColor),
                   weekendTextStyle: TextStyle(color: textColor),
-                  // Bugünün Yuvarlağı
                   todayDecoration: BoxDecoration(
                     color: themeProvider.secondaryColor.withOpacity(0.5),
                     shape: BoxShape.circle,
                   ),
-                  // Seçili Günün Yuvarlağı
                   selectedDecoration: BoxDecoration(
                     color: themeProvider.secondaryColor,
                     shape: BoxShape.circle,
                   ),
-                  // Görevi olan günlerdeki NOKTA (Marker)
                   markerDecoration: BoxDecoration(
                     color: isDarkMode ? Colors.white : themeProvider.primaryColor,
                     shape: BoxShape.circle,
@@ -132,7 +118,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       _selectedDay = selectedDay;
                       _focusedDay = focusedDay;
                     });
-                    _selectedEvents.value = _getTasksForDay(selectedDay);
                   }
                 },
                 onFormatChanged: (format) {
@@ -141,14 +126,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 onPageChanged: (focusedDay) {
                   _focusedDay = focusedDay;
                 },
-                // Markerları (Noktaları) yükleyen kısım
-                eventLoader: _getTasksForDay,
+                // Takvim üzerindeki noktaları (marker) oluşturmak için listeyi veriyoruz
+                eventLoader: (day) => _getTasksForDay(day, allTasks),
               ),
             ),
 
             const SizedBox(height: 10),
             
-            // --- SEÇİLİ GÜNÜN GÖREVLERİ ---
+            // --- BAŞLIK ---
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Align(
@@ -161,12 +146,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ),
             const SizedBox(height: 10),
 
+            // --- LİSTE ---
             Expanded(
-              child: ValueListenableBuilder<List<Task>>(
-                valueListenable: _selectedEvents,
-                builder: (context, value, _) {
-                  if (value.isEmpty) {
-                    return Center(
+              child: selectedEvents.isEmpty
+                  ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -175,27 +158,26 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           const Text("Bugün için planlanmış görev yok.", style: TextStyle(color: Colors.grey)),
                         ],
                       ),
-                    );
-                  }
-                  return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: value.length,
-                    itemBuilder: (context, index) {
-                      final task = value[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12.0),
-                        child: TaskCard(
-                          task: task,
-                          // Kategorileri artık kullanmıyoruz ama TaskCard istiyor, boş yollayalım
-                          categories: const {}, 
-                          onTap: () => _navigateToDetail(task),
-                          onToggleDone: () => _toggleTaskStatus(task),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                      itemCount: selectedEvents.length,
+                      itemBuilder: (context, index) {
+                        final task = selectedEvents[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
+                          child: TaskCard(
+                            task: task,
+                            categories: const {}, // Kategoriler kullanılmıyor
+                            onTap: () => _navigateToDetail(task),
+                            onToggleDone: () {
+                              // Provider üzerinden güncelleme yapıyoruz ki her yer haber alsın
+                              taskProvider.toggleTaskStatus(task);
+                            },
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

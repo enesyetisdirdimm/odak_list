@@ -3,11 +3,11 @@ import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/sub_task.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/services/database_service.dart';
-import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/theme_provider.dart';
+import 'package:odak_list/task_provider.dart';
 
 class TaskDetailScreen extends StatefulWidget {
   final Task task;
@@ -23,17 +23,24 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   late TextEditingController _titleController;
   late TextEditingController _notesController;
   late TextEditingController _subTaskController;
+  late TextEditingController _tagController; // YENİ
   
   late Task _tempTask;
-  final NotificationService _notificationService = NotificationService();
   final Map<int, String> _priorities = {2: 'Yüksek', 1: 'Normal', 0: 'Düşük'};
   
-  List<Project> _projects = []; // Projeleri buraya çekeceğiz
+  final Map<String, String> _recurrenceOptions = {
+    'none': 'Tekrar Yok',
+    'daily': 'Her Gün',
+    'weekly': 'Her Hafta',
+    'monthly': 'Her Ay',
+  };
+  
+  List<Project> _projects = []; 
 
   @override
   void initState() {
     super.initState();
-    _loadProjects(); // Projeleri yükle
+    _loadProjects();
 
     _tempTask = Task(
       id: widget.task.id,
@@ -43,20 +50,22 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       category: widget.task.category,
       priority: widget.task.priority,
       notes: widget.task.notes,
-      projectId: widget.task.projectId, // Proje ID'sini al
+      projectId: widget.task.projectId,
       subTasks: List.from(widget.task.subTasks),
+      recurrence: widget.task.recurrence,
+      tags: List.from(widget.task.tags), // YENİ
     );
 
     _titleController = TextEditingController(text: _tempTask.title);
     _notesController = TextEditingController(text: _tempTask.notes);
     _subTaskController = TextEditingController();
+    _tagController = TextEditingController(); // YENİ
   }
 
   Future<void> _loadProjects() async {
     final projects = await widget.dbService.getProjectsWithStats();
     setState(() {
       _projects = projects;
-      // Eğer proje seçili değilse ve proje listesi doluysa ilkini seç
       if (_tempTask.projectId == null && _projects.isNotEmpty) {
         _tempTask.projectId = _projects.first.id;
       }
@@ -68,6 +77,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     _titleController.dispose();
     _notesController.dispose();
     _subTaskController.dispose();
+    _tagController.dispose();
     super.dispose();
   }
 
@@ -103,36 +113,22 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     _tempTask.title = _titleController.text.trim();
     _tempTask.notes = _notesController.text.trim();
 
+    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+
     if (_tempTask.id == null) {
-      Task createdTask = await widget.dbService.createTask(_tempTask);
-      if (createdTask.dueDate != null && createdTask.dueDate!.isAfter(DateTime.now())) {
-        await _notificationService.scheduleNotification(
-          id: createdTask.id!,
-          title: "Hatırlatıcı: ${createdTask.title}",
-          body: "Görevinizin zamanı geldi!",
-          scheduledTime: createdTask.dueDate!,
-        );
-      }
+      await taskProvider.addTask(_tempTask);
     } else {
-      await widget.dbService.updateTask(_tempTask);
-      await _notificationService.cancelNotification(_tempTask.id!);
-      if (_tempTask.dueDate != null && _tempTask.dueDate!.isAfter(DateTime.now())) {
-        await _notificationService.scheduleNotification(
-          id: _tempTask.id!,
-          title: "Hatırlatıcı: ${_tempTask.title}",
-          body: "Görevinizin zamanı geldi!",
-          scheduledTime: _tempTask.dueDate!,
-        );
-      }
+      await taskProvider.updateTask(_tempTask);
     }
+    
     if (!mounted) return;
     Navigator.pop(context);
   }
 
   void _deleteTask() async {
     if (_tempTask.id != null) {
-      await widget.dbService.deleteTask(_tempTask.id!);
-      await _notificationService.cancelNotification(_tempTask.id!);
+      final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+      await taskProvider.deleteTask(_tempTask.id!);
     }
     if (!mounted) return;
     Navigator.pop(context);
@@ -172,6 +168,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // BAŞLIK
             TextField(
               controller: _titleController,
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor),
@@ -183,7 +180,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
             ),
             const SizedBox(height: 20),
             
-            // Tarih Seçimi
+            // TARİH
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.calendar_today, color: themeProvider.primaryColor),
@@ -203,10 +200,26 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
             ),
             Divider(color: Colors.grey.withOpacity(0.3)),
             
-            // PROJE VE ÖNCELİK SEÇİMİ
+            // TEKRAR
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.repeat, color: themeProvider.primaryColor),
+              title: DropdownButtonFormField<String>(
+                dropdownColor: isDarkMode ? AppColors.cardDark : Colors.white,
+                value: _tempTask.recurrence,
+                decoration: const InputDecoration(border: InputBorder.none),
+                items: _recurrenceOptions.entries.map((e) => DropdownMenuItem(
+                  value: e.key, 
+                  child: Text(e.value, style: TextStyle(color: textColor)),
+                )).toList(),
+                onChanged: (val) => setState(() => _tempTask.recurrence = val ?? 'none'),
+              ),
+            ),
+            Divider(color: Colors.grey.withOpacity(0.3)),
+
+            // PROJE VE ÖNCELİK
             Row(
               children: [
-                // PROJE DROPDOWN (Kategori yerine)
                 Expanded(
                   child: DropdownButtonFormField<int>(
                     dropdownColor: isDarkMode ? AppColors.cardDark : Colors.white,
@@ -218,7 +231,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                         children: [
                           Icon(Icons.circle, size: 12, color: Color(p.colorValue)),
                           const SizedBox(width: 8),
-                          Text(p.title, style: TextStyle(color: textColor)),
+                          SizedBox(width: 80, child: Text(p.title, style: TextStyle(color: textColor), overflow: TextOverflow.ellipsis)),
                         ],
                       )
                     )).toList(),
@@ -238,8 +251,65 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
               ],
             ),
             Divider(color: Colors.grey.withOpacity(0.3)),
+
+            // YENİ: ETİKETLER (TAGS) ALANI
+            const Text("Etiketler", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _tagController,
+                    style: TextStyle(color: textColor),
+                    decoration: const InputDecoration(
+                      hintText: "Etiket ekle (örn: acil)", 
+                      border: InputBorder.none,
+                      prefixIcon: Icon(Icons.tag, size: 20, color: Colors.grey),
+                    ),
+                    onSubmitted: (val) {
+                      if (val.trim().isNotEmpty) {
+                        setState(() {
+                          _tempTask.tags.add(val.trim());
+                          _tagController.clear();
+                        });
+                      }
+                    },
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.add, color: themeProvider.secondaryColor),
+                  onPressed: () {
+                    if (_tagController.text.trim().isNotEmpty) {
+                      setState(() {
+                        _tempTask.tags.add(_tagController.text.trim());
+                        _tagController.clear();
+                      });
+                    }
+                  },
+                )
+              ],
+            ),
+            // Eklenen Etiketleri Göster (Wrap)
+            if (_tempTask.tags.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: _tempTask.tags.map((tag) => Chip(
+                    label: Text("#$tag", style: const TextStyle(fontSize: 12, color: Colors.white)),
+                    backgroundColor: themeProvider.primaryColor.withOpacity(0.8),
+                    deleteIcon: const Icon(Icons.close, size: 16, color: Colors.white),
+                    onDeleted: () {
+                      setState(() => _tempTask.tags.remove(tag));
+                    },
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide.none),
+                  )).toList(),
+                ),
+              ),
+
+            Divider(color: Colors.grey.withOpacity(0.3)),
             
-            // Alt Görevler
+            // ALT GÖREVLER
             const Text("Alt Görevler", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
             Row(
               children: [
@@ -264,10 +334,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
               ],
             ),
             ..._tempTask.subTasks.map((sub) => CheckboxListTile(
-              title: Text(sub.title, style: TextStyle(
-                color: textColor,
-                decoration: sub.isDone ? TextDecoration.lineThrough : null
-              )),
+              title: Text(sub.title, style: TextStyle(color: textColor, decoration: sub.isDone ? TextDecoration.lineThrough : null)),
               value: sub.isDone,
               activeColor: themeProvider.secondaryColor,
               checkColor: Colors.white,
@@ -283,16 +350,14 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
             )),
             
             Divider(color: Colors.grey.withOpacity(0.3)),
-            // Notlar
+            
+            // NOTLAR
             const Text("Notlar", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
             TextField(
               controller: _notesController,
               maxLines: 3,
               style: TextStyle(color: textColor),
-              decoration: const InputDecoration(
-                hintText: 'Detaylı açıklama ekle...',
-                border: InputBorder.none,
-              ),
+              decoration: const InputDecoration(hintText: 'Detaylı açıklama ekle...', border: InputBorder.none),
             ),
           ],
         ),

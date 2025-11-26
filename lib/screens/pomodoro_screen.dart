@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'package:audioplayers/audioplayers.dart'; // Ses Paketi
 import 'package:flutter/material.dart';
 import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
-import 'package:provider/provider.dart'; // Provider
-import 'package:odak_list/theme_provider.dart'; // Tema
+import 'package:provider/provider.dart';
+import 'package:odak_list/theme_provider.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class PomodoroScreen extends StatefulWidget {
   const PomodoroScreen({super.key});
@@ -24,18 +26,59 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   bool isRunning = false;
   String currentMode = 'Odaklan';
 
-  @override
+  // --- SES SİSTEMİ DEĞİŞKENLERİ ---
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  String? _playingSound; // Şu an çalan sesin adı (rain, forest vs.)
+  bool _isSoundLoading = false; // Yükleniyor mu?
+
+  // Ses Listesi
+  final List<Map<String, dynamic>> _sounds = [
+    {'id': 'rain', 'name': 'Yağmur', 'icon': Icons.water_drop, 'file': 'sounds/rain.mp3'},
+    {'id': 'forest', 'name': 'Orman', 'icon': Icons.forest, 'file': 'sounds/forest.mp3'},
+    {'id': 'cafe', 'name': 'Kafe', 'icon': Icons.coffee, 'file': 'sounds/cafe.mp3'},
+  ];
+
+ @override
   void dispose() {
     _timer?.cancel();
+    _audioPlayer.dispose();
+    WakelockPlus.disable(); // YENİ: Sayfadan çıkınca ekranı serbest bırak
     super.dispose();
+  }
+
+  // Ses Aç/Kapa Fonksiyonu
+  Future<void> _toggleSound(String id, String fileName) async {
+    if (_playingSound == id) {
+      // Zaten bu çalıyor, durdur
+      await _audioPlayer.stop();
+      setState(() => _playingSound = null);
+    } else {
+      // Yeni ses çal
+      setState(() => _isSoundLoading = true);
+      try {
+        await _audioPlayer.stop(); // Öncekini durdur
+        await _audioPlayer.setReleaseMode(ReleaseMode.loop); // Döngüye al (Sürekli çalsın)
+        await _audioPlayer.play(AssetSource(fileName));
+        setState(() => _playingSound = id);
+      } catch (e) {
+        print("Ses hatası: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Ses dosyası bulunamadı! assets/sounds klasörünü kontrol et."))
+        );
+      } finally {
+        setState(() => _isSoundLoading = false);
+      }
+    }
   }
 
   void toggleTimer() {
     if (isRunning) {
       _timer?.cancel();
+      WakelockPlus.disable(); // YENİ: Ekran kapanabilir
       setState(() => isRunning = false);
     } else {
       setState(() => isRunning = true);
+      WakelockPlus.enable(); // YENİ: Ekran ASLA kapanmasın
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (remainingSeconds > 0) {
           setState(() => remainingSeconds--);
@@ -45,11 +88,15 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
       });
     }
   }
-
   void _finishTimer() {
     _timer?.cancel();
+    WakelockPlus.disable(); // YENİ: İş bitti, ekran kapanabilir
     setState(() => isRunning = false);
     NotificationService().showInstantNotification(); 
+    
+    _audioPlayer.stop();
+    setState(() => _playingSound = null);
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -67,19 +114,23 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   void resetTimer() {
     _timer?.cancel();
+    _audioPlayer.stop(); // Sıfırlayınca sesi de kapat
     setState(() {
       isRunning = false;
       remainingSeconds = initialSeconds;
+      _playingSound = null;
     });
   }
 
   void changeMode(String mode, int seconds) {
     _timer?.cancel();
+    _audioPlayer.stop(); // Mod değişince sesi kapat
     setState(() {
       currentMode = mode;
       initialSeconds = seconds;
       remainingSeconds = seconds;
       isRunning = false;
+      _playingSound = null;
     });
   }
 
@@ -91,13 +142,13 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // --- DÜZELTME: Tema Rengi ---
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     
     final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final subTextColor = isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final cardColor = Theme.of(context).cardColor;
 
     double progress = remainingSeconds / initialSeconds;
 
@@ -109,6 +160,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Mod Seçimi
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -125,6 +177,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
               
               const Spacer(),
 
+              // Sayaç
               Stack(
                 alignment: Alignment.center,
                 children: [
@@ -135,11 +188,10 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                       value: progress,
                       strokeWidth: 20,
                       backgroundColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300,
-                      // --- DÜZELTME: Sayaç rengi ---
                       valueColor: AlwaysStoppedAnimation<Color>(
                         currentMode == 'Odaklan' 
-                            ? themeProvider.secondaryColor // SEÇİLEN RENK
-                            : AppColors.categoryHome, // Mola yeşil kalsın veya değişsin
+                            ? themeProvider.secondaryColor 
+                            : AppColors.categoryHome,
                       ),
                     ),
                   ),
@@ -167,8 +219,65 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                 ],
               ),
 
+              const SizedBox(height: 30),
+
+              // --- ODAK SESLERİ MENÜSÜ ---
+              Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: isDarkMode ? [] : [
+                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      "Odak Sesleri",
+                      style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: _sounds.map((sound) {
+                        bool isPlaying = _playingSound == sound['id'];
+                        return GestureDetector(
+                          onTap: () => _toggleSound(sound['id'], sound['file']),
+                          child: Column(
+                            children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isPlaying 
+                                      ? themeProvider.secondaryColor 
+                                      : (isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200),
+                                  shape: BoxShape.circle,
+                                  boxShadow: isPlaying ? [
+                                    BoxShadow(color: themeProvider.secondaryColor.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 2))
+                                  ] : [],
+                                ),
+                                child: Icon(
+                                  sound['icon'], 
+                                  color: isPlaying ? Colors.white : subTextColor,
+                                  size: 28,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(sound['name'], style: TextStyle(fontSize: 12, color: isPlaying ? themeProvider.secondaryColor : subTextColor, fontWeight: isPlaying ? FontWeight.bold : FontWeight.normal)),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+
               const Spacer(),
 
+              // Kontrol Butonları
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -176,7 +285,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
                     onPressed: toggleTimer,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-                      // --- DÜZELTME: Buton Rengi ---
                       backgroundColor: isRunning ? AppColors.priorityHigh : themeProvider.secondaryColor,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     ),
@@ -212,7 +320,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
           color: isSelected ? (isDarkMode ? Colors.grey.shade800 : Colors.white) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            // --- DÜZELTME: Kenarlık Rengi ---
             color: isSelected ? themeProvider.primaryColor : Colors.transparent,
             width: 2
           ),
@@ -220,7 +327,6 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
         child: Text(
           mode,
           style: TextStyle(
-            // --- DÜZELTME: Metin Rengi ---
             color: isSelected ? themeProvider.primaryColor : textColor,
             fontWeight: FontWeight.bold,
           ),

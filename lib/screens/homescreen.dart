@@ -7,15 +7,14 @@ import 'package:odak_list/screens/task_detail_screen.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/theme_provider.dart';
+import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/utils/app_colors.dart';
 import 'package:odak_list/utils/app_styles.dart';
 import 'package:odak_list/widgets/task_card.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
-import 'package:odak_list/screens/projects_screen.dart';
 
-// Sıralama Seçenekleri (Enum)
 enum SortOption { dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
 
 class HomeScreen extends StatefulWidget {
@@ -27,28 +26,15 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Task> _tasks = [];
-  List<Project> _projects = [];
-  bool isLoading = true;
-  
-  // Dashboard İstatistikleri
-  int totalTasks = 0;
-  int completedTasks = 0;
-  double progress = 0.0;
-  
   int? _selectedProjectId; 
-
-  // Arama ve Sıralama Değişkenleri (YENİ)
   String _searchQuery = '';
-  SortOption _currentSortOption = SortOption.dateAsc; // Varsayılan: Tarihe göre (En yakın)
+  SortOption _currentSortOption = SortOption.dateAsc;
   final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    initializeDateFormatting('tr_TR', null).then((_) {
-      _loadData();
-    });
+    initializeDateFormatting('tr_TR', null);
   }
 
   @override
@@ -57,72 +43,40 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _loadData() async {
-    setState(() => isLoading = true);
-    try {
-      final projects = await widget.dbService.getProjectsWithStats();
-      
-      List<Task> tasks;
-      if (_selectedProjectId != null) {
-        tasks = await widget.dbService.getTasksByProject(_selectedProjectId!);
-      } else {
-        if (projects.isNotEmpty) {
-          _selectedProjectId = projects.first.id;
-          tasks = await widget.dbService.getTasksByProject(_selectedProjectId!);
-        } else {
-          tasks = [];
-        }
-      }
-
-      setState(() {
-        _projects = projects;
-        _tasks = tasks;
-        
-        if (_selectedProjectId != null) {
-          final selectedProject = projects.firstWhere(
-            (p) => p.id == _selectedProjectId, 
-            orElse: () => Project(title: '', colorValue: 0)
-          );
-          totalTasks = selectedProject.taskCount;
-          completedTasks = selectedProject.completedTaskCount;
-          progress = selectedProject.progress;
-        } else {
-          totalTasks = 0;
-          completedTasks = 0;
-          progress = 0.0;
-        }
-        
-        isLoading = false;
-      });
-    } catch (e) {
-      print("Hata: $e");
-      setState(() => isLoading = false);
+  List<Task> _processTasks(List<Task> allTasks) {
+    List<Task> filtered;
+    if (_selectedProjectId != null) {
+      filtered = allTasks.where((t) => t.projectId == _selectedProjectId).toList();
+    } else {
+      filtered = allTasks; 
     }
-  }
 
-  // YENİ: Sıralama Fonksiyonu
-  List<Task> _processTasks(List<Task> tasks) {
-    // 1. Arama Filtresi
-    List<Task> filtered = tasks.where((t) {
-      return t.title.toLowerCase().contains(_searchQuery.toLowerCase());
-    }).toList();
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered.where((t) {
+        final query = _searchQuery.toLowerCase();
+        // Başlıkta VEYA Etiketlerde ara
+        final inTitle = t.title.toLowerCase().contains(query);
+        final inTags = t.tags.any((tag) => tag.toLowerCase().contains(query));
+        
+        return inTitle || inTags;
+      }).toList();
+    }
 
-    // 2. Sıralama
     filtered.sort((a, b) {
       switch (_currentSortOption) {
-        case SortOption.dateAsc: // Tarih (En Yakın)
+        case SortOption.dateAsc:
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return a.dueDate!.compareTo(b.dueDate!);
-        case SortOption.dateDesc: // Tarih (En Uzak)
+        case SortOption.dateDesc:
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return b.dueDate!.compareTo(a.dueDate!);
-        case SortOption.priorityDesc: // Öncelik (Yüksekten Düşüğe)
+        case SortOption.priorityDesc:
           return b.priority.compareTo(a.priority);
-        case SortOption.priorityAsc: // Öncelik (Düşükten Yükseğe)
+        case SortOption.priorityAsc:
           return a.priority.compareTo(b.priority);
-        case SortOption.titleAsc: // Alfabetik
+        case SortOption.titleAsc:
           return a.title.compareTo(b.title);
       }
     });
@@ -130,9 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return filtered;
   }
 
-  // YENİ: Sıralama Menüsü Göster
   void _showSortOptions(ThemeProvider themeProvider) {
-    final isDark = themeProvider.themeMode == ThemeMode.dark;
     showModalBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).cardColor,
@@ -166,9 +118,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListTile(
       leading: Icon(icon, color: isSelected ? theme.secondaryColor : Colors.grey),
       title: Text(
-        title,
+        title, 
         style: TextStyle(
-          color: isSelected ? theme.secondaryColor : null,
+          color: isSelected ? theme.secondaryColor : null, 
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal
         )
       ),
@@ -180,10 +132,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showAddProjectDialog() {
+  void _showAddProjectDialog(TaskProvider taskProvider) {
     final controller = TextEditingController();
     final List<Color> colors = [
-      Colors.blue, Colors.red, Colors.green, Colors.orange, Colors.purple, Colors.teal
+      Colors.blue, Colors.red, Colors.green, Colors.orange, Colors.purple, Colors.teal, Colors.pink, Colors.indigo
     ];
     Color selectedColor = colors[0];
 
@@ -205,6 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 8,
                   children: colors.map((color) => GestureDetector(
                     onTap: () => setState(() => selectedColor = color),
                     child: Container(
@@ -224,12 +177,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ElevatedButton(
                 onPressed: () async {
                   if (controller.text.isNotEmpty) {
-                    await widget.dbService.createProject(Project(
+                    await taskProvider.addProject(Project(
                       title: controller.text,
                       colorValue: selectedColor.value
                     ));
                     Navigator.pop(ctx);
-                    _loadData();
                   }
                 },
                 child: const Text("Oluştur"),
@@ -242,10 +194,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToDetail([Task? task]) async {
-    if (_projects.isEmpty) {
-      _showAddProjectDialog();
+    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+    
+    if (taskProvider.projects.isEmpty) {
+      _showAddProjectDialog(taskProvider);
       return;
     }
+
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -255,49 +210,47 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-    _loadData();
-  }
-
-  Future<void> _deleteTaskWithUndo(Task task, ThemeProvider themeProvider) async {
-    await widget.dbService.deleteTask(task.id!);
-    await NotificationService().cancelNotification(task.id!);
-    HapticFeedback.mediumImpact();
-    _loadData();
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("'${task.title}' silindi"),
-        action: SnackBarAction(
-          label: 'GERİ AL',
-          textColor: themeProvider.secondaryColor,
-          onPressed: () async {
-            task.id = null;
-            await widget.dbService.createTask(task);
-            _loadData();
-          },
-        ),
-      ),
-    );
-  }
-
-  Future<void> _toggleTaskStatus(Task task) async {
-    task.isDone = !task.isDone;
-    await widget.dbService.updateTask(task);
-    HapticFeedback.lightImpact();
-    _loadData();
+    taskProvider.loadData();
   }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final taskProvider = Provider.of<TaskProvider>(context);
+    
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final subTextColor = isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
     final cardColor = Theme.of(context).cardColor;
 
-    // İşlenmiş Görev Listesi (Arama + Sıralama)
-    final processedTasks = _processTasks(_tasks);
+    final allProjects = taskProvider.projects;
+    final allTasks = taskProvider.tasks;
+
+    if (_selectedProjectId == null && allProjects.isNotEmpty) {
+        _selectedProjectId = allProjects.first.id;
+    } else if (_selectedProjectId != null && allProjects.isNotEmpty) {
+        bool exists = allProjects.any((p) => p.id == _selectedProjectId);
+        if (!exists) {
+           _selectedProjectId = allProjects.first.id;
+        }
+    }
+
+    int totalTasks = 0;
+    int completedTasks = 0;
+    double progress = 0.0;
+
+    if (_selectedProjectId != null && allProjects.isNotEmpty) {
+      try {
+        final selectedProject = allProjects.firstWhere((p) => p.id == _selectedProjectId);
+        totalTasks = selectedProject.taskCount;
+        completedTasks = selectedProject.completedTaskCount;
+        progress = selectedProject.progress;
+      } catch (e) {
+        // Hata yok
+      }
+    }
+
+    final processedTasks = _processTasks(allTasks);
     final activeTasksList = processedTasks.where((t) => !t.isDone).toList();
     final completedTasksList = processedTasks.where((t) => t.isDone).toList();
     
@@ -307,13 +260,13 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
-          // --- Dashboard ---
+          // --- DASHBOARD BÖLÜMÜ ---
           SizedBox(
-            height: 280,
+            height: 290, // YÜKSEKLİK ARTTIRILDI (280 -> 290)
             child: Stack(
               children: [
                 Container(
-                  height: 220,
+                  height: 230, // ARKA PLAN ARTTIRILDI (220 -> 230)
                   width: double.infinity,
                   decoration: BoxDecoration(
                     gradient: themeProvider.currentGradient,
@@ -322,7 +275,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       bottomRight: Radius.circular(30),
                     ),
                   ),
-                  padding: const EdgeInsets.only(left: 24, right: 24, top: 60),
+                  // DÜZELTME: top padding 60 -> 50 yapıldı (Yazılar yukarı çıktı)
+                  padding: const EdgeInsets.only(left: 24, right: 24, top: 50),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -336,16 +290,34 @@ class _HomeScreenState extends State<HomeScreen> {
                             },
                             child: Container(
                               padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                shape: BoxShape.circle,
+                              ),
                               child: const Icon(Icons.settings, color: Colors.white, size: 24),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 20),
-                      const Text("Merhaba, Enes! 👋", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+                      // DÜZELTME: Boşluk azaltıldı (20 -> 10)
+                      const SizedBox(height: 10),
+                      const Text(
+                        "Merhaba, Enes! 👋",
+                        style: TextStyle(
+                          fontSize: 28, 
+                          fontWeight: FontWeight.bold, 
+                          color: Colors.white
+                        ),
+                      ),
                       const SizedBox(height: 5),
-                      Text(dateStr, style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.w500)),
+                      Text(
+                        dateStr,
+                        style: TextStyle(
+                          fontSize: 14, 
+                          color: Colors.white.withOpacity(0.8), 
+                          fontWeight: FontWeight.w500
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -384,8 +356,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
-                              _selectedProjectId != null 
-                                ? _projects.firstWhere((p) => p.id == _selectedProjectId, orElse: ()=> Project(title: 'Yükleniyor', colorValue: 0)).title 
+                              _selectedProjectId != null && allProjects.isNotEmpty
+                                ? allProjects.firstWhere((p) => p.id == _selectedProjectId, orElse: () => Project(title: 'Yükleniyor', colorValue: 0)).title 
                                 : "Proje Seçin",
                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
                             ),
@@ -403,39 +375,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
           const SizedBox(height: 20),
 
-          Padding(
-  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10),
-  child: Row(
-    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-    children: [
-      Text(
-        "Projelerim",
-        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textColor),
-      ),
-      GestureDetector(
-        onTap: () async {
-          // Projeler sayfasına git ve seçilen proje ID'sini bekle
-          final selectedId = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => ProjectsScreen(dbService: widget.dbService)),
-          );
-          
-          // Eğer bir proje seçip döndüyse, ana ekranı ona göre güncelle
-          if (selectedId != null) {
-            setState(() {
-              _selectedProjectId = selectedId;
-            });
-            _loadData();
-          }
-        },
-        child: Text(
-          "Tümünü Gör",
-          style: TextStyle(color: themeProvider.secondaryColor, fontWeight: FontWeight.bold),
-        ),
-      ),
-    ],
-  ),
-),
           // --- PROJE LİSTESİ ---
           SizedBox(
             height: 50,
@@ -444,7 +383,7 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 24),
               children: [
                 GestureDetector(
-                  onTap: _showAddProjectDialog,
+                  onTap: () => _showAddProjectDialog(taskProvider),
                   child: Container(
                     width: 50,
                     margin: const EdgeInsets.only(right: 12),
@@ -455,12 +394,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Icon(Icons.add, color: themeProvider.secondaryColor),
                   ),
                 ),
-                ..._projects.map((project) {
+                ...allProjects.map((project) {
                   bool isSelected = _selectedProjectId == project.id;
                   return GestureDetector(
                     onTap: () {
                       setState(() => _selectedProjectId = project.id);
-                      _loadData();
                       HapticFeedback.selectionClick();
                     },
                     onLongPress: () {
@@ -471,10 +409,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("İptal")),
                           TextButton(
                             onPressed: () async {
-                              await widget.dbService.deleteProject(project.id!);
+                              await taskProvider.deleteProject(project.id!);
                               Navigator.pop(ctx);
-                              _selectedProjectId = null; 
-                              _loadData();
+                              setState(() => _selectedProjectId = null);
                             }, 
                             child: const Text("Sil", style: TextStyle(color: Colors.red))
                           ),
@@ -492,7 +429,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         boxShadow: isSelected ? [BoxShadow(color: Color(project.colorValue).withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))] : [],
                       ),
                       alignment: Alignment.center,
-                      child: Text(project.title, style: TextStyle(color: isSelected ? Colors.white : (isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight), fontWeight: FontWeight.bold)),
+                      child: Text(
+                        project.title, 
+                        style: TextStyle(
+                          color: isSelected ? Colors.white : (isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight), 
+                          fontWeight: FontWeight.bold
+                        )
+                      ),
                     ),
                   );
                 }),
@@ -500,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // --- YENİ: ARAMA ve SIRALAMA ---
+          // --- ARAMA VE SIRALAMA ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: Row(
@@ -545,29 +488,42 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // --- GÖREV LİSTESİ ---
           Expanded(
-            child: isLoading
+            child: taskProvider.isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _tasks.isEmpty
-                    ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.assignment_add, size: 60, color: Colors.grey.shade400), const SizedBox(height: 10), Text("Bu projede görev yok", style: TextStyle(color: subTextColor))]))
+                : activeTasksList.isEmpty && completedTasksList.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center, 
+                          children: [
+                            Icon(Icons.assignment_add, size: 60, color: Colors.grey.shade400), 
+                            const SizedBox(height: 10), 
+                            Text("Bu projede görev yok", style: TextStyle(color: subTextColor))
+                          ]
+                        )
+                      )
                     : ListView(
                         padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
                         children: [
                           if (activeTasksList.isNotEmpty) ...[
                             Text("YAPILACAKLAR (${activeTasksList.length})", style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14, letterSpacing: 1.2)),
                             const SizedBox(height: 10),
-                            ...activeTasksList.map((task) => _buildDismissibleTask(task, themeProvider)),
+                            ...activeTasksList.map((task) => _buildDismissibleTask(task, themeProvider, taskProvider)),
                           ],
-                          if (activeTasksList.isNotEmpty && completedTasksList.isNotEmpty) const SizedBox(height: 24),
+                          
+                          if (activeTasksList.isNotEmpty && completedTasksList.isNotEmpty) 
+                            const SizedBox(height: 24),
+                          
                           if (completedTasksList.isNotEmpty) ...[
                              Text("TAMAMLANANLAR (${completedTasksList.length})", style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14, letterSpacing: 1.2)),
                             const SizedBox(height: 10),
-                            ...completedTasksList.map((task) => Opacity(opacity: 0.6, child: _buildDismissibleTask(task, themeProvider))),
+                            ...completedTasksList.map((task) => Opacity(opacity: 0.6, child: _buildDismissibleTask(task, themeProvider, taskProvider))),
                           ],
                         ],
                       ),
           ),
         ],
       ),
+      
       floatingActionButton: FloatingActionButton(
         onPressed: () => _navigateToDetail(),
         backgroundColor: themeProvider.secondaryColor,
@@ -577,7 +533,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildDismissibleTask(Task task, ThemeProvider themeProvider) {
+  Widget _buildDismissibleTask(Task task, ThemeProvider themeProvider, TaskProvider taskProvider) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: Dismissible(
@@ -596,20 +552,37 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         confirmDismiss: (direction) async {
           if (direction == DismissDirection.startToEnd) {
-            await _toggleTaskStatus(task);
-            return false;
+            await taskProvider.toggleTaskStatus(task); 
+            return false; 
           } else {
             return true; 
           }
         },
-        onDismissed: (direction) {
-          if (direction == DismissDirection.endToStart) _deleteTaskWithUndo(task, themeProvider);
+        onDismissed: (direction) async {
+          if (direction == DismissDirection.endToStart) {
+            await taskProvider.deleteTask(task.id!); 
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("'${task.title}' silindi"),
+                  action: SnackBarAction(
+                    label: 'GERİ AL',
+                    textColor: themeProvider.secondaryColor,
+                    onPressed: () async {
+                      task.id = null;
+                      await taskProvider.addTask(task);
+                    },
+                  ),
+                ),
+              );
+            }
+          }
         },
         child: TaskCard(
           task: task,
           categories: const {},
           onTap: () => _navigateToDetail(task),
-          onToggleDone: () => _toggleTaskStatus(task),
+          onToggleDone: () => taskProvider.toggleTaskStatus(task),
         ),
       ),
     );

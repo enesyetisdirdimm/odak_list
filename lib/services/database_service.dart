@@ -29,8 +29,7 @@ class DatabaseService {
     );
   }
 
-  Future<void> _onCreate(Database db, int version) async {
-    // PROJELER TABLOSU
+Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +38,7 @@ class DatabaseService {
       )
     ''');
 
-    // GÖREVLER TABLOSU (projectId eklendi)
+    // tags SÜTUNU EKLENDİ (TEXT olarak)
     await db.execute('''
       CREATE TABLE tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,14 +49,15 @@ class DatabaseService {
         priority INTEGER NOT NULL DEFAULT 1,
         notes TEXT,
         subTasksJson TEXT,
-        projectId INTEGER
+        projectId INTEGER,
+        recurrence TEXT DEFAULT 'none',
+        tags TEXT 
       )
     ''');
 
-    // Varsayılan bir "Genel" projesi ekleyelim ki kullanıcı boş ekran görmesin
     await db.insert('projects', {
       'title': 'Genel', 
-      'colorValue': 0xFF42A5F5 // Mavi
+      'colorValue': 0xFF42A5F5
     });
   }
 
@@ -134,5 +134,17 @@ class DatabaseService {
   Future<void> deleteTask(int id) async {
     final db = await database;
     await db.delete('tasks', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<String> getDatabasePath() async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    return join(documentsDirectory.path, 'odak_pro_v1.db');
+  }
+
+  // 2. Veritabanını Kapat (Geri yükleme yaparken şart)
+  Future<void> close() async {
+    final db = await database;
+    await db.close();
+    _database = null; // Instance'ı sıfırla ki tekrar açabilsin
   }
 }

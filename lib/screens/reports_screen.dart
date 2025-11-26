@@ -1,85 +1,50 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:odak_list/models/project.dart';
-import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
+import 'package:odak_list/utils/app_styles.dart'; // EKLENDİ
 import 'package:intl/intl.dart';
-import 'package:odak_list/utils/app_styles.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/theme_provider.dart';
+import 'package:odak_list/task_provider.dart'; // EKLENDİ
 
-class ReportsScreen extends StatefulWidget {
+class ReportsScreen extends StatelessWidget {
   const ReportsScreen({super.key});
-
-  @override
-  State<ReportsScreen> createState() => _ReportsScreenState();
-}
-
-class _ReportsScreenState extends State<ReportsScreen> {
-  final DatabaseService _dbService = DatabaseService();
-  
-  int totalTasks = 0;
-  int completedTasks = 0;
-  int pendingTasks = 0;
-  
-  List<Project> projects = [];
-  List<int> weeklyData = List.filled(7, 0);
-  
-  bool isLoading = true;
-  int touchedIndex = -1;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadStats();
-  }
-
-  Future<void> _loadStats() async {
-    final allProjects = await _dbService.getProjectsWithStats();
-    final allTasks = await _dbService.getTasks();
-    
-    int completed = 0;
-    int pending = 0;
-    
-    List<int> weekCounts = List.filled(7, 0);
-    DateTime now = DateTime.now();
-
-    for (var task in allTasks) {
-      if (task.isDone) completed++;
-      else pending++;
-
-      if (task.dueDate != null) {
-        final difference = now.difference(task.dueDate!).inDays;
-        if (difference >= 0 && difference < 7) {
-          weekCounts[6 - difference]++;
-        }
-      }
-    }
-
-    if (mounted) {
-      setState(() {
-        projects = allProjects;
-        totalTasks = allTasks.length;
-        completedTasks = completed;
-        pendingTasks = pending;
-        weeklyData = weekCounts;
-        isLoading = false;
-      });
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    // Veriyi anlık dinliyoruz
+    final taskProvider = Provider.of<TaskProvider>(context);
+
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final subTextColor = isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
     final cardColor = Theme.of(context).cardColor;
 
+    // VERİLERİ HESAPLA
+    final projects = taskProvider.projects;
+    final allTasks = taskProvider.tasks;
+    
+    int totalTasks = allTasks.length;
+    int completedTasks = allTasks.where((t) => t.isDone).length;
+    int pendingTasks = totalTasks - completedTasks;
+    
+    // Haftalık Veri
+    List<int> weeklyData = List.filled(7, 0);
+    DateTime now = DateTime.now();
+    for (var task in allTasks) {
+      if (task.isDone && task.dueDate != null) {
+        final difference = now.difference(task.dueDate!).inDays;
+        if (difference >= 0 && difference < 7) {
+          weeklyData[6 - difference]++;
+        }
+      }
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
-        child: isLoading 
+        child: taskProvider.isLoading 
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 24.0),
@@ -92,19 +57,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      "Bu haftaki verimlilik durumun.",
+                      "Verimlilik durumun aşağıdadır.",
                       style: TextStyle(color: subTextColor, fontSize: 15),
                     ),
                     const SizedBox(height: 30),
 
-                    // --- 1. PASTA GRAFİK KARTI ---
+                    // --- PASTA GRAFİK ---
                     Container(
-                      height: 260, // Biraz yükselttik
+                      height: 260, 
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         color: cardColor,
                         borderRadius: BorderRadius.circular(24),
-                        boxShadow: isDarkMode ? [] : AppStyles.softShadow,
+                        boxShadow: isDarkMode ? [] : AppStyles.softShadow, // AppStyles düzeltildi
                         border: isDarkMode ? Border.all(color: Colors.white10) : null,
                       ),
                       child: Column(
@@ -112,47 +77,34 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           Expanded(
                             child: Row(
                               children: [
-                                // Grafik Kısmı
                                 Expanded(
                                   flex: 3,
                                   child: totalTasks == 0 
                                     ? Center(child: Text("Veri Yok", style: TextStyle(color: subTextColor)))
                                     : PieChart(
                                       PieChartData(
-                                        pieTouchData: PieTouchData(
-                                          touchCallback: (FlTouchEvent event, pieTouchResponse) {
-                                            setState(() {
-                                              if (!event.isInterestedForInteractions || pieTouchResponse == null || pieTouchResponse.touchedSection == null) {
-                                                touchedIndex = -1;
-                                                return;
-                                              }
-                                              touchedIndex = pieTouchResponse.touchedSection!.touchedSectionIndex;
-                                            });
-                                          },
-                                        ),
                                         borderData: FlBorderData(show: false),
-                                        sectionsSpace: 2, // Dilimler arası boşluk
-                                        centerSpaceRadius: 35, // Ortadaki boşluk küçültüldü
+                                        sectionsSpace: 2,
+                                        centerSpaceRadius: 35,
                                         sections: [
                                           PieChartSectionData(
                                             color: themeProvider.secondaryColor,
                                             value: completedTasks.toDouble(),
-                                            title: '${((completedTasks/totalTasks)*100).toInt()}%',
-                                            radius: touchedIndex == 0 ? 55 : 45,
+                                            title: totalTasks > 0 ? '${((completedTasks/totalTasks)*100).toInt()}%' : '0%',
+                                            radius: 50,
                                             titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
                                           ),
                                           PieChartSectionData(
                                             color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200,
                                             value: pendingTasks.toDouble(),
-                                            title: '', // Boş kısma yazı yazmıyoruz, karışmasın
-                                            radius: touchedIndex == 1 ? 45 : 35,
+                                            title: '',
+                                            radius: 40,
                                           ),
                                         ],
                                       ),
                                     ),
                                 ),
                                 const SizedBox(width: 20),
-                                // Lejant (Açıklama) Kısmı
                                 Expanded(
                                   flex: 2,
                                   child: Column(
@@ -174,12 +126,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
                     const SizedBox(height: 30),
 
-                    // --- 2. ÇUBUK GRAFİK KARTI ---
+                    // --- ÇUBUK GRAFİK ---
                     Text("Son 7 Günlük Aktivite", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                     const SizedBox(height: 16),
                     
                     Container(
-                      height: 240, // Yükseklik artırıldı, ferah olsun
+                      height: 240,
                       padding: const EdgeInsets.fromLTRB(12, 24, 12, 10),
                       decoration: BoxDecoration(
                         color: cardColor,
@@ -207,7 +159,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             bottomTitles: AxisTitles(
                               sideTitles: SideTitles(
                                 showTitles: true,
-                                reservedSize: 30, // Alt yazılar için yer açtık
+                                reservedSize: 30,
                                 getTitlesWidget: (double value, TitleMeta meta) {
                                   DateTime day = DateTime.now().subtract(Duration(days: 6 - value.toInt()));
                                   String text = DateFormat('E', 'tr_TR').format(day);
@@ -231,7 +183,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 BarChartRodData(
                                   toY: e.value.toDouble(),
                                   color: e.key == 6 ? themeProvider.secondaryColor : (isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300),
-                                  width: 14, // Çubuklar biraz inceltildi
+                                  width: 14,
                                   borderRadius: BorderRadius.circular(4),
                                   backDrawRodData: BackgroundBarChartRodData(
                                     show: true,
@@ -248,7 +200,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
                     const SizedBox(height: 30),
 
-                    // --- 3. PROJE LİSTESİ ---
+                    // --- PROJE LİSTESİ ---
                     if (projects.isNotEmpty) ...[
                       Text("Proje Bazlı İlerleme", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                       const SizedBox(height: 16),
@@ -271,13 +223,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  // DÜZELTME: Proje ismi uzunsa taşmasın (Expanded)
                                   Expanded(
                                     child: Text(
                                       project.title, 
                                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
                                       maxLines: 1,
-                                      overflow: TextOverflow.ellipsis, // ... koy
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                   const SizedBox(width: 10),

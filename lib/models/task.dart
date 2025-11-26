@@ -9,8 +9,12 @@ class Task {
   String? category;
   int priority;
   String? notes;
-  int? projectId; // <-- YENİ: Proje Bağlantısı
+  int? projectId;
   List<SubTask> subTasks;
+  String recurrence;
+  
+  // YENİ: Etiketler Listesi
+  List<String> tags; 
 
   Task({
     this.id,
@@ -20,9 +24,12 @@ class Task {
     this.category,
     this.priority = 1,
     this.notes,
-    this.projectId, // <-- YENİ
+    this.projectId,
     List<SubTask>? subTasks,
-  }) : subTasks = subTasks ?? [];
+    this.recurrence = 'none',
+    List<String>? tags, // YENİ
+  }) : subTasks = subTasks ?? [],
+       tags = tags ?? []; // YENİ
 
   Map<String, dynamic> toMap() {
     return {
@@ -33,8 +40,11 @@ class Task {
       'category': category,
       'priority': priority,
       'notes': notes,
-      'projectId': projectId, // <-- YENİ
+      'projectId': projectId,
       'subTasksJson': jsonEncode(subTasks.map((e) => e.toMap()).toList()),
+      'recurrence': recurrence,
+      // Listeyi virgüllü string olarak kaydediyoruz (örn: "acil,iş")
+      'tags': tags.join(','), // YENİ
     };
   }
 
@@ -49,6 +59,12 @@ class Task {
       }
     }
 
+    // String'i tekrar listeye çevir
+    List<String> loadedTags = [];
+    if (map['tags'] != null && map['tags'].toString().isNotEmpty) {
+      loadedTags = map['tags'].toString().split(',');
+    }
+
     return Task(
       id: map['id'],
       title: map['title'] ?? '',
@@ -57,8 +73,10 @@ class Task {
       category: map['category'],
       priority: map['priority'] ?? 1,
       notes: map['notes'],
-      projectId: map['projectId'], // <-- YENİ
+      projectId: map['projectId'],
       subTasks: loadedSubTasks,
+      recurrence: map['recurrence'] ?? 'none',
+      tags: loadedTags, // YENİ
     );
   }
 }

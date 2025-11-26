@@ -3,8 +3,8 @@ import 'package:intl/intl.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/utils/app_colors.dart';
 import 'package:odak_list/utils/app_styles.dart';
-import 'package:provider/provider.dart'; // Provider
-import 'package:odak_list/theme_provider.dart'; // Tema
+import 'package:provider/provider.dart'; 
+import 'package:odak_list/theme_provider.dart';
 
 class TaskCard extends StatelessWidget {
   final Task task;
@@ -31,7 +31,6 @@ class TaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // --- DÜZELTME: Rengi buradan çekiyoruz ---
     final themeProvider = Provider.of<ThemeProvider>(context);
     
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -39,9 +38,7 @@ class TaskCard extends StatelessWidget {
     final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final subTextColor = isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    final Color categoryColor = categories[task.category] ?? Colors.grey;
     final Color priorityColor = _getPriorityColor(task.priority);
-
     final bool hasTime = task.dueDate != null && (task.dueDate!.hour != 0 || task.dueDate!.minute != 0);
 
     return GestureDetector(
@@ -55,27 +52,29 @@ class TaskCard extends StatelessWidget {
           border: isDarkMode ? Border.all(color: Colors.white10) : null,
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start, // İçeriği yukarı hizala
           children: [
-            // --- Checkbox (Kutucuk) ---
-            GestureDetector(
-              onTap: onToggleDone,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  // Seçili ise MAVİ (seçilen renk), değilse transparan
-                  color: task.isDone ? themeProvider.secondaryColor : Colors.transparent,
-                  border: Border.all(
-                    // Kenarlık rengi de dinamik
-                    color: task.isDone ? themeProvider.secondaryColor : (isDarkMode ? Colors.grey : Colors.grey.shade400),
-                    width: 2,
+            // Checkbox
+            Padding(
+              padding: const EdgeInsets.only(top: 2.0), // Biraz aşağı al
+              child: GestureDetector(
+                onTap: onToggleDone,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: task.isDone ? themeProvider.secondaryColor : Colors.transparent,
+                    border: Border.all(
+                      color: task.isDone ? themeProvider.secondaryColor : (isDarkMode ? Colors.grey : Colors.grey.shade400),
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  borderRadius: BorderRadius.circular(10),
+                  child: task.isDone
+                      ? const Icon(Icons.check, size: 18, color: Colors.white)
+                      : null,
                 ),
-                child: task.isDone
-                    ? const Icon(Icons.check, size: 18, color: Colors.white)
-                    : null,
               ),
             ),
             const SizedBox(width: 16),
@@ -85,6 +84,7 @@ class TaskCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Başlık
                   Text(
                     task.title,
                     style: TextStyle(
@@ -95,28 +95,43 @@ class TaskCard extends StatelessWidget {
                       decorationColor: subTextColor,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: categoryColor.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          task.category != null && task.category!.isNotEmpty ? task.category! : 'Genel',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: categoryColor,
-                          ),
-                        ),
+                  
+                  // Tekrar İkonu (Varsa)
+                  if (task.recurrence != 'none')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          Icon(Icons.repeat, size: 12, color: themeProvider.primaryColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            task.recurrence == 'daily' ? 'Her Gün' : (task.recurrence == 'weekly' ? 'Her Hafta' : 'Her Ay'),
+                            style: TextStyle(fontSize: 10, color: subTextColor),
+                          )
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Icon(Icons.circle, size: 8, color: priorityColor),
-                    ],
-                  ),
+                    ),
+
+                  // YENİ: Etiketler (Tags)
+                  if (task.tags.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6.0),
+                      child: Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: task.tags.map((tag) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: themeProvider.primaryColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            "#$tag",
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: themeProvider.primaryColor),
+                          ),
+                        )).toList(),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -126,32 +141,23 @@ class TaskCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  // Öncelik Noktası
+                  Icon(Icons.circle, size: 8, color: priorityColor),
+                  const SizedBox(height: 4),
                   Text(
                     DateFormat('dd').format(task.dueDate!),
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: task.isDone ? subTextColor : textColor,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: task.isDone ? subTextColor : textColor),
                   ),
                   Text(
                     DateFormat('MMM', 'tr_TR').format(task.dueDate!).toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: subTextColor,
-                    ),
+                    style: TextStyle(fontSize: 12, color: subTextColor),
                   ),
                   if (hasTime)
                     Padding(
                       padding: const EdgeInsets.only(top: 4.0),
                       child: Text(
                         DateFormat('HH:mm').format(task.dueDate!),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          // --- DÜZELTME: Saat rengi de dinamik ---
-                          color: themeProvider.secondaryColor,
-                        ),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: themeProvider.secondaryColor),
                       ),
                     ),
                 ],

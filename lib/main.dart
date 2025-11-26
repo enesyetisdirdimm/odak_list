@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart'; // YENİ PAKET
+import 'package:provider/provider.dart';
 import 'package:odak_list/screens/navigation_screen.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/services/notification_service.dart';
-import 'package:odak_list/theme_provider.dart'; // YENİ DOSYA
+import 'package:odak_list/theme_provider.dart';
+import 'package:odak_list/task_provider.dart'; // YENİ EKLENDİ
 import 'package:odak_list/utils/app_colors.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -36,11 +37,12 @@ void main() async {
     print("Servis başlatma hatası: $e");
   }
 
-  // UYGULAMAYI PROVIDER İLE SARMALIYORUZ
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        // YENİ: TaskProvider'ı buraya ekliyoruz
+        ChangeNotifierProvider(create: (_) => TaskProvider()), 
       ],
       child: MyApp(dbService: dbService),
     ),
@@ -54,20 +56,17 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Temayı Provider'dan dinle
     final themeProvider = Provider.of<ThemeProvider>(context);
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'OdakList',
       
-      // AÇIK TEMA
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
         scaffoldBackgroundColor: AppColors.backgroundLight,
         cardColor: AppColors.cardLight,
-        // Ana renk olarak seçilen rengi kullan
         primaryColor: themeProvider.primaryColor,
         colorScheme: ColorScheme.light(
           primary: themeProvider.primaryColor,
@@ -79,13 +78,11 @@ class MyApp extends StatelessWidget {
         ),
       ),
 
-      // KOYU TEMA
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppColors.backgroundDark,
         cardColor: AppColors.cardDark,
-        // Koyu modda renkler biraz daha pastel
         primaryColor: themeProvider.primaryColor,
         colorScheme: ColorScheme.dark(
           primary: themeProvider.primaryColor,
@@ -98,8 +95,7 @@ class MyApp extends StatelessWidget {
         dialogBackgroundColor: AppColors.cardDark,
       ),
 
-      themeMode: themeProvider.themeMode, // Dinamik Mod
-      
+      themeMode: themeProvider.themeMode,
       home: NavigationScreen(dbService: dbService),
     );
   }
