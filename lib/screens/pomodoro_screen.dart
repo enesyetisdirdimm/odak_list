@@ -6,6 +6,7 @@ import 'package:odak_list/utils/app_colors.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:flutter/services.dart';
 
 class PomodoroScreen extends StatefulWidget {
   const PomodoroScreen({super.key});
@@ -72,6 +73,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   }
 
   void toggleTimer() {
+    HapticFeedback.selectionClick();
     if (isRunning) {
       _timer?.cancel();
       WakelockPlus.disable(); // YENİ: Ekran kapanabilir
@@ -113,6 +115,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   }
 
   void resetTimer() {
+    HapticFeedback.selectionClick();
     _timer?.cancel();
     _audioPlayer.stop(); // Sıfırlayınca sesi de kapat
     setState(() {

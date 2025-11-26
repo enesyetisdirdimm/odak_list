@@ -148,6 +148,55 @@ class SettingsScreen extends StatelessWidget {
 
           const SizedBox(height: 30),
 
+          Text("Geri Bildirim", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+          const SizedBox(height: 10),
+          Container(
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Column(
+              children: [
+                // Ses Efekti Anahtarı
+                Consumer<TaskProvider>( // TaskProvider'ı dinliyoruz
+                  builder: (context, taskProvider, child) {
+                    return SwitchListTile(
+                      title: Text("Ses Efektleri", style: TextStyle(color: textColor)),
+                      subtitle: const Text("Görev tamamlanınca ses çıkar.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      secondary: Icon(Icons.volume_up, color: themeProvider.secondaryColor),
+                      value: taskProvider.isSoundEnabled,
+                      activeColor: themeProvider.secondaryColor,
+                      onChanged: (val) {
+                        taskProvider.toggleSound(val);
+                      },
+                    );
+                  }
+                ),
+                
+                // Araya çizgi (İsteğe bağlı)
+                Divider(color: Colors.grey.withOpacity(0.2), height: 1),
+
+                // Titreşim Anahtarı
+                Consumer<TaskProvider>(
+                  builder: (context, taskProvider, child) {
+                    return SwitchListTile(
+                      title: Text("Titreşim", style: TextStyle(color: textColor)),
+                      subtitle: const Text("Etkileşimlerde telefonu titret.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      secondary: Icon(Icons.vibration, color: themeProvider.secondaryColor),
+                      value: taskProvider.isVibrationEnabled,
+                      activeColor: themeProvider.secondaryColor,
+                      onChanged: (val) {
+                        taskProvider.toggleVibration(val);
+                      },
+                    );
+                  }
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 30),
+
           // --- YEDEKLEME ALANI ---
           Text("Veri Yönetimi", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
           const SizedBox(height: 10),

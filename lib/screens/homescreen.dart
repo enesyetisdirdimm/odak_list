@@ -5,7 +5,6 @@ import 'package:odak_list/models/task.dart';
 import 'package:odak_list/screens/settings_screen.dart';
 import 'package:odak_list/screens/task_detail_screen.dart';
 import 'package:odak_list/services/database_service.dart';
-import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/utils/app_colors.dart';
@@ -15,6 +14,7 @@ import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 
+// Sıralama Seçenekleri
 enum SortOption { dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
 
 class HomeScreen extends StatefulWidget {
@@ -26,7 +26,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Seçili proje ID'si (null ise tüm projeler veya varsayılan)
   int? _selectedProjectId; 
+
+  // Arama ve Sıralama Durumları
   String _searchQuery = '';
   SortOption _currentSortOption = SortOption.dateAsc;
   final TextEditingController _searchController = TextEditingController();
@@ -34,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Tarih formatı için yerel ayarları yükle
     initializeDateFormatting('tr_TR', null);
   }
 
@@ -43,7 +47,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  // --- GÖREVLERİ İŞLEME (Filtreleme & Sıralama) ---
   List<Task> _processTasks(List<Task> allTasks) {
+    // 1. Proje Filtresi
     List<Task> filtered;
     if (_selectedProjectId != null) {
       filtered = allTasks.where((t) => t.projectId == _selectedProjectId).toList();
@@ -51,6 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
       filtered = allTasks; 
     }
 
+    // 2. Arama Filtresi (Başlık ve Etiketlerde)
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((t) {
         final query = _searchQuery.toLowerCase();
@@ -62,21 +69,22 @@ class _HomeScreenState extends State<HomeScreen> {
       }).toList();
     }
 
+    // 3. Sıralama
     filtered.sort((a, b) {
       switch (_currentSortOption) {
-        case SortOption.dateAsc:
+        case SortOption.dateAsc: // Tarih (En Yakın)
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return a.dueDate!.compareTo(b.dueDate!);
-        case SortOption.dateDesc:
+        case SortOption.dateDesc: // Tarih (En Uzak)
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return b.dueDate!.compareTo(a.dueDate!);
-        case SortOption.priorityDesc:
+        case SortOption.priorityDesc: // Öncelik (Yüksekten Düşüğe)
           return b.priority.compareTo(a.priority);
-        case SortOption.priorityAsc:
+        case SortOption.priorityAsc: // Öncelik (Düşükten Yükseğe)
           return a.priority.compareTo(b.priority);
-        case SortOption.titleAsc:
+        case SortOption.titleAsc: // Alfabetik
           return a.title.compareTo(b.title);
       }
     });
@@ -84,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return filtered;
   }
 
+  // --- SIRALAMA MENÜSÜ ---
   void _showSortOptions(ThemeProvider themeProvider) {
     showModalBottomSheet(
       context: context,
@@ -132,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- PROJE EKLEME DİYALOĞU ---
   void _showAddProjectDialog(TaskProvider taskProvider) {
     final controller = TextEditingController();
     final List<Color> colors = [
@@ -193,6 +203,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- DETAY SAYFASINA GİT ---
   void _navigateToDetail([Task? task]) async {
     final taskProvider = Provider.of<TaskProvider>(context, listen: false);
     
@@ -210,11 +221,27 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+    // Provider zaten loadData yapıyor ama garanti olsun diye çağırabiliriz
     taskProvider.loadData();
+  }
+
+  // --- GECİKMİŞ GÖREVLERİ KURTARMA ---
+  Future<void> _recoverOverdueTasks(List<Task> overdueTasks, TaskProvider provider) async {
+    for (var task in overdueTasks) {
+      // Görevi bugüne taşı
+      task.dueDate = DateTime.now();
+      await provider.updateTask(task);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("${overdueTasks.length} görev bugüne taşındı! 🚀"))
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // --- PROVIDERLARI ÇAĞIRIYORUZ ---
     final themeProvider = Provider.of<ThemeProvider>(context);
     final taskProvider = Provider.of<TaskProvider>(context);
     
@@ -226,6 +253,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final allProjects = taskProvider.projects;
     final allTasks = taskProvider.tasks;
 
+    // --- GECİKMİŞ GÖREVLERİ BUL ---
+    DateTime now = DateTime.now();
+    DateTime todayMidnight = DateTime(now.year, now.month, now.day);
+    
+    // Gecikmiş: Tamamlanmamış VE Tarihi var VE Tarihi bugünden önce
+    List<Task> overdueTasks = allTasks.where((t) {
+      return !t.isDone && 
+             t.dueDate != null && 
+             t.dueDate!.isBefore(todayMidnight);
+    }).toList();
+
+
+    // --- VARSAYILAN PROJE SEÇİMİ ---
     if (_selectedProjectId == null && allProjects.isNotEmpty) {
         _selectedProjectId = allProjects.first.id;
     } else if (_selectedProjectId != null && allProjects.isNotEmpty) {
@@ -235,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
     }
 
+    // --- İSTATİSTİKLERİ HESAPLA ---
     int totalTasks = 0;
     int completedTasks = 0;
     double progress = 0.0;
@@ -250,8 +291,15 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
+    // --- LİSTEYİ FİLTRELE ---
     final processedTasks = _processTasks(allTasks);
-    final activeTasksList = processedTasks.where((t) => !t.isDone).toList();
+    
+    // Listede SADECE Bugünü veya Geleceği göster. (Gecikmişler yukarıda özel kutuda çıkacak)
+    final activeTasksList = processedTasks.where((t) => 
+        !t.isDone && 
+        (t.dueDate == null || !t.dueDate!.isBefore(todayMidnight))
+    ).toList();
+    
     final completedTasksList = processedTasks.where((t) => t.isDone).toList();
     
     String dateStr = DateFormat('d MMMM, EEEE', 'tr_TR').format(DateTime.now());
@@ -260,13 +308,14 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
-          // --- DASHBOARD BÖLÜMÜ ---
+          // --- 1. BÖLÜM: DASHBOARD ---
           SizedBox(
-            height: 290, // YÜKSEKLİK ARTTIRILDI (280 -> 290)
+            height: 290,
             child: Stack(
               children: [
+                // Renkli Arka Plan
                 Container(
-                  height: 230, // ARKA PLAN ARTTIRILDI (220 -> 230)
+                  height: 230,
                   width: double.infinity,
                   decoration: BoxDecoration(
                     gradient: themeProvider.currentGradient,
@@ -275,7 +324,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       bottomRight: Radius.circular(30),
                     ),
                   ),
-                  // DÜZELTME: top padding 60 -> 50 yapıldı (Yazılar yukarı çıktı)
                   padding: const EdgeInsets.only(left: 24, right: 24, top: 50),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -284,6 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Icon(Icons.menu, color: Colors.white.withOpacity(0.9)),
+                          // Ayarlar Butonu
                           GestureDetector(
                             onTap: () {
                               Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen()));
@@ -299,25 +348,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                       ),
-                      // DÜZELTME: Boşluk azaltıldı (20 -> 10)
                       const SizedBox(height: 10),
-                      const Text(
-                        "Merhaba, Enes! 👋",
-                        style: TextStyle(
-                          fontSize: 28, 
-                          fontWeight: FontWeight.bold, 
-                          color: Colors.white
-                        ),
-                      ),
+                      const Text("Merhaba, Enes! 👋", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
                       const SizedBox(height: 5),
-                      Text(
-                        dateStr,
-                        style: TextStyle(
-                          fontSize: 14, 
-                          color: Colors.white.withOpacity(0.8), 
-                          fontWeight: FontWeight.w500
-                        ),
-                      ),
+                      Text(dateStr, style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.w500)),
                     ],
                   ),
                 ),
@@ -375,13 +409,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
           const SizedBox(height: 20),
 
-          // --- PROJE LİSTESİ ---
+          // --- 2. BÖLÜM: PROJE LİSTESİ (Yatay) ---
           SizedBox(
             height: 50,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 24),
               children: [
+                // Proje Ekle Butonu
                 GestureDetector(
                   onTap: () => _showAddProjectDialog(taskProvider),
                   child: Container(
@@ -394,6 +429,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Icon(Icons.add, color: themeProvider.secondaryColor),
                   ),
                 ),
+                // Proje Kartları
                 ...allProjects.map((project) {
                   bool isSelected = _selectedProjectId == project.id;
                   return GestureDetector(
@@ -402,6 +438,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       HapticFeedback.selectionClick();
                     },
                     onLongPress: () {
+                      // Projeyi Silme Onayı
                       showDialog(context: context, builder: (ctx) => AlertDialog(
                         title: const Text("Projeyi Sil"),
                         content: const Text("Bu projeyi ve tüm görevlerini silmek istediğine emin misin?"),
@@ -443,7 +480,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // --- ARAMA VE SIRALAMA ---
+          // --- 3. BÖLÜM: ARAMA VE SIRALAMA ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: Row(
@@ -486,7 +523,40 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // --- GÖREV LİSTESİ ---
+          // --- YENİ: GECİKMİŞ GÖREV UYARISI ---
+          if (overdueTasks.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: Colors.redAccent.withOpacity(0.3))
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text("Gecikmiş ${overdueTasks.length} Görev", style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+                          Text("Dünden kalanlar var.", style: TextStyle(fontSize: 12, color: subTextColor)),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _recoverOverdueTasks(overdueTasks, taskProvider),
+                      child: const Text("KURTAR", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                    )
+                  ],
+                ),
+              ),
+            ),
+
+          // --- 4. BÖLÜM: GÖREV LİSTESİ ---
           Expanded(
             child: taskProvider.isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -495,9 +565,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center, 
                           children: [
-                            Icon(Icons.assignment_add, size: 60, color: Colors.grey.shade400), 
-                            const SizedBox(height: 10), 
-                            Text("Bu projede görev yok", style: TextStyle(color: subTextColor))
+                            // İkonu büyüttük ve renklendirdik
+                            Icon(Icons.rocket_launch, size: 80, color: themeProvider.secondaryColor.withOpacity(0.5)), 
+                            const SizedBox(height: 20), 
+                            Text(
+                              "Hiç görevin yok!", 
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor)
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              "Yeni bir başlangıç yap ve ilk görevini ekle.", 
+                              style: TextStyle(color: subTextColor)
+                            ),
+                            const SizedBox(height: 30),
+                            // Yönlendirici ok
+                            Icon(Icons.arrow_downward, color: subTextColor),
                           ]
                         )
                       )
@@ -524,6 +606,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       
+      // --- FAB (Ekleme Butonu) ---
       floatingActionButton: FloatingActionButton(
         onPressed: () => _navigateToDetail(),
         backgroundColor: themeProvider.secondaryColor,
@@ -533,17 +616,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- YARDIMCI: Kaydırılabilir Görev Kartı ---
   Widget _buildDismissibleTask(Task task, ThemeProvider themeProvider, TaskProvider taskProvider) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: Dismissible(
         key: Key('task_${task.id}'),
+        // Sola kaydırma (Tamamla) Arka Planı
         background: Container(
           decoration: BoxDecoration(color: themeProvider.primaryColor, borderRadius: BorderRadius.circular(20)),
           alignment: Alignment.centerLeft,
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: const Icon(Icons.check, color: Colors.white, size: 32),
         ),
+        // Sağa kaydırma (Sil) Arka Planı
         secondaryBackground: Container(
           decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(20)),
           alignment: Alignment.centerRight,
@@ -552,7 +638,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         confirmDismiss: (direction) async {
           if (direction == DismissDirection.startToEnd) {
-            await taskProvider.toggleTaskStatus(task); 
+            await taskProvider.toggleTaskStatus(task); // Provider üzerinden
             return false; 
           } else {
             return true; 
@@ -560,7 +646,10 @@ class _HomeScreenState extends State<HomeScreen> {
         },
         onDismissed: (direction) async {
           if (direction == DismissDirection.endToStart) {
-            await taskProvider.deleteTask(task.id!); 
+            // Silince titreşim ver
+            HapticFeedback.mediumImpact();
+
+            await taskProvider.deleteTask(task.id!); // Provider üzerinden
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(

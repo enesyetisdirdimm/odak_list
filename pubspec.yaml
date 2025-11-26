@@ -34,11 +34,15 @@ dependencies:
   shared_preferences: ^2.2.2
   table_calendar: ^3.0.9
   fl_chart: ^0.66.0
-  audioplayers: 5.2.1
+  audioplayers: ^6.0.0
   share_plus: ^10.0.0 
   file_picker: ^8.0.0
-  wakelock_plus: 1.1.2
   home_widget: ^0.8.1
+  # Wakelock'u güncelledik (Eskiden 1.1.2 idi, 1.2.0 yaptık)
+  wakelock_plus: 1.2.0
+  
+  # Speech to text (Hata verirse 6.3.0'a çekeriz ama şimdilik kalsın)
+ # speech_to_text: ^6.6.2
 
 # --- SORUN ÇÖZÜCÜ KISIM ---
 dependency_overrides:
@@ -55,6 +59,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.10
 
 flutter:
   uses-material-design: true
@@ -69,3 +74,10 @@ flutter_launcher_icons:
   min_sdk_android: 21
   adaptive_icon_background: "#FE806F"
   adaptive_icon_foreground: "assets/icon.png"
+
+flutter_native_splash:
+  color: "#0A192F" # Arka plan (Senin widget rengin)
+  image: assets/icon.png # İkonun yolu
+  android_12:
+    image: assets/icon.png
+    color: "#0A192F"

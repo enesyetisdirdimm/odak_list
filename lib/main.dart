@@ -6,9 +6,11 @@ import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:odak_list/task_provider.dart'; // YENİ EKLENDİ
 import 'package:odak_list/utils/app_colors.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:odak_list/screens/onboarding_screen.dart';
 
 Future<void> _configureLocalTimeZone() async {
   tz.initializeTimeZones();
@@ -30,6 +32,9 @@ void main() async {
   
   final dbService = DatabaseService();
 
+  final prefs = await SharedPreferences.getInstance();
+  final bool seenOnboarding = prefs.getBool('seenOnboarding') ?? false;
+
   try {
     await _configureLocalTimeZone();
     await NotificationService().init();
@@ -44,16 +49,21 @@ void main() async {
         // YENİ: TaskProvider'ı buraya ekliyoruz
         ChangeNotifierProvider(create: (_) => TaskProvider()), 
       ],
-      child: MyApp(dbService: dbService),
+      child: MyApp(
+        dbService: dbService, 
+        startScreen: seenOnboarding 
+            ? NavigationScreen(dbService: dbService) 
+            : OnboardingScreen(dbService: dbService),
+      ),
     ),
   );
 }
 
 class MyApp extends StatelessWidget {
   final DatabaseService dbService;
+  final Widget startScreen; // YENİ: Başlangıç ekranını parametre alıyoruz
 
-  const MyApp({super.key, required this.dbService});
-
+  const MyApp({super.key, required this.dbService, required this.startScreen});
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
@@ -96,7 +106,7 @@ class MyApp extends StatelessWidget {
       ),
 
       themeMode: themeProvider.themeMode,
-      home: NavigationScreen(dbService: dbService),
+      home: startScreen,
     );
   }
 }

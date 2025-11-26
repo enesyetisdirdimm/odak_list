@@ -1,11 +1,11 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:odak_list/utils/app_colors.dart';
-import 'package:odak_list/utils/app_styles.dart'; // EKLENDİ
+import 'package:odak_list/utils/app_styles.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/theme_provider.dart';
-import 'package:odak_list/task_provider.dart'; // EKLENDİ
+import 'package:odak_list/task_provider.dart';
 
 class ReportsScreen extends StatelessWidget {
   const ReportsScreen({super.key});
@@ -13,7 +13,6 @@ class ReportsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    // Veriyi anlık dinliyoruz
     final taskProvider = Provider.of<TaskProvider>(context);
 
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
@@ -29,17 +28,40 @@ class ReportsScreen extends StatelessWidget {
     int completedTasks = allTasks.where((t) => t.isDone).length;
     int pendingTasks = totalTasks - completedTasks;
     
-    // Haftalık Veri
+    // --- KRİTİK DÜZELTME: SAATLERİ SIFIRLAYARAK HESAPLAMA ---
     List<int> weeklyData = List.filled(7, 0);
+    
+    // Bugünün gece yarısı (Saat 00:00:00)
     DateTime now = DateTime.now();
+    DateTime todayMidnight = DateTime(now.year, now.month, now.day);
+
     for (var task in allTasks) {
+      // Sadece tamamlanmış ve tarihi olan görevleri say
       if (task.isDone && task.dueDate != null) {
-        final difference = now.difference(task.dueDate!).inDays;
-        if (difference >= 0 && difference < 7) {
-          weeklyData[6 - difference]++;
+        
+        // Görevin tarihini de gece yarısına çek
+        DateTime taskDate = task.dueDate!;
+        DateTime taskMidnight = DateTime(taskDate.year, taskDate.month, taskDate.day);
+
+        // Gün farkını hesapla (Artık saatler 0 olduğu için tam gün farkı çıkar)
+        int daysDiff = todayMidnight.difference(taskMidnight).inDays;
+
+        // Eğer görev son 7 gün içindeyse (0 = Bugün, 6 = 6 gün önce)
+        if (daysDiff >= 0 && daysDiff < 7) {
+          // Grafik soldan sağa (Eskiden Yeniye) olduğu için indexi ters çeviriyoruz
+          // daysDiff 0 (Bugün) -> Index 6 (En sağ)
+          // daysDiff 6 (Geçen hafta) -> Index 0 (En sol)
+          weeklyData[6 - daysDiff]++;
         }
       }
     }
+
+    // Maksimum Y değerini bul (Grafik taşmasın diye)
+    double maxY = 0;
+    for (var val in weeklyData) {
+      if (val > maxY) maxY = val.toDouble();
+    }
+    maxY = maxY + 2; // Biraz boşluk bırak
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -57,19 +79,19 @@ class ReportsScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      "Verimlilik durumun aşağıdadır.",
+                      "Bu haftaki verimlilik durumun.",
                       style: TextStyle(color: subTextColor, fontSize: 15),
                     ),
                     const SizedBox(height: 30),
 
-                    // --- PASTA GRAFİK ---
+                    // --- 1. PASTA GRAFİK ---
                     Container(
                       height: 260, 
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         color: cardColor,
                         borderRadius: BorderRadius.circular(24),
-                        boxShadow: isDarkMode ? [] : AppStyles.softShadow, // AppStyles düzeltildi
+                        boxShadow: isDarkMode ? [] : AppStyles.softShadow,
                         border: isDarkMode ? Border.all(color: Colors.white10) : null,
                       ),
                       child: Column(
@@ -126,7 +148,7 @@ class ReportsScreen extends StatelessWidget {
 
                     const SizedBox(height: 30),
 
-                    // --- ÇUBUK GRAFİK ---
+                    // --- 2. ÇUBUK GRAFİK (DÜZELTİLDİ) ---
                     Text("Son 7 Günlük Aktivite", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                     const SizedBox(height: 16),
                     
@@ -142,7 +164,7 @@ class ReportsScreen extends StatelessWidget {
                       child: BarChart(
                         BarChartData(
                           alignment: BarChartAlignment.spaceAround,
-                          maxY: (weeklyData.reduce((curr, next) => curr > next ? curr : next) + 2).toDouble(),
+                          maxY: maxY,
                           barTouchData: BarTouchData(
                             touchTooltipData: BarTouchTooltipData(
                               tooltipBgColor: themeProvider.primaryColor,
@@ -161,6 +183,7 @@ class ReportsScreen extends StatelessWidget {
                                 showTitles: true,
                                 reservedSize: 30,
                                 getTitlesWidget: (double value, TitleMeta meta) {
+                                  // Alt kısımdaki gün isimleri (Pzt, Sal vs.)
                                   DateTime day = DateTime.now().subtract(Duration(days: 6 - value.toInt()));
                                   String text = DateFormat('E', 'tr_TR').format(day);
                                   return SideTitleWidget(
@@ -182,12 +205,13 @@ class ReportsScreen extends StatelessWidget {
                               barRods: [
                                 BarChartRodData(
                                   toY: e.value.toDouble(),
+                                  // Bugünün çubuğu renkli, diğerleri gri
                                   color: e.key == 6 ? themeProvider.secondaryColor : (isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300),
                                   width: 14,
                                   borderRadius: BorderRadius.circular(4),
                                   backDrawRodData: BackgroundBarChartRodData(
                                     show: true,
-                                    toY: (weeklyData.reduce((curr, next) => curr > next ? curr : next) + 2).toDouble(),
+                                    toY: maxY, // Arka plan yüksekliği
                                     color: isDarkMode ? Colors.grey.shade900 : Colors.grey.shade50,
                                   )
                                 ),
@@ -200,7 +224,7 @@ class ReportsScreen extends StatelessWidget {
 
                     const SizedBox(height: 30),
 
-                    // --- PROJE LİSTESİ ---
+                    // --- 3. PROJE LİSTESİ ---
                     if (projects.isNotEmpty) ...[
                       Text("Proje Bazlı İlerleme", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                       const SizedBox(height: 16),

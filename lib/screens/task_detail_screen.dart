@@ -113,6 +113,10 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     _tempTask.title = _titleController.text.trim();
     _tempTask.notes = _notesController.text.trim();
 
+    if (_tempTask.dueDate == null) {
+      _tempTask.dueDate = DateTime.now();
+    }
+    
     final taskProvider = Provider.of<TaskProvider>(context, listen: false);
 
     if (_tempTask.id == null) {
