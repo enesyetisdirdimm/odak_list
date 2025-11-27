@@ -1,20 +1,24 @@
-import 'dart:convert';
+// lib/models/task.dart
+
 import 'package:odak_list/models/sub_task.dart';
 
 class Task {
-  int? id;
+  String? id;
   String title;
   bool isDone;
   DateTime? dueDate;
   String? category;
   int priority;
   String? notes;
-  int? projectId;
+  String? projectId;
+  String? assignedMemberId;
+  String? creatorId;
   List<SubTask> subTasks;
   String recurrence;
+  List<String> tags;
   
-  // YENİ: Etiketler Listesi
-  List<String> tags; 
+  // YENİ: Son yorum zamanı
+  DateTime? lastCommentAt; 
 
   Task({
     this.id,
@@ -25,58 +29,62 @@ class Task {
     this.priority = 1,
     this.notes,
     this.projectId,
+    this.assignedMemberId,
+    this.creatorId,
     List<SubTask>? subTasks,
     this.recurrence = 'none',
-    List<String>? tags, // YENİ
+    List<String>? tags,
+    this.lastCommentAt, // Constructor'a ekle
   }) : subTasks = subTasks ?? [],
-       tags = tags ?? []; // YENİ
+       tags = tags ?? [];
 
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
       'title': title,
-      'isDone': isDone ? 1 : 0,
+      'isDone': isDone,
       'dueDate': dueDate?.toIso8601String(),
       'category': category,
       'priority': priority,
       'notes': notes,
       'projectId': projectId,
-      'subTasksJson': jsonEncode(subTasks.map((e) => e.toMap()).toList()),
+      'assignedMemberId': assignedMemberId,
+      'creatorId': creatorId,
+      'subTasks': subTasks.map((e) => e.toMap()).toList(),
       'recurrence': recurrence,
-      // Listeyi virgüllü string olarak kaydediyoruz (örn: "acil,iş")
-      'tags': tags.join(','), // YENİ
+      'tags': tags,
+      // YENİ: Map'e ekle
+      'lastCommentAt': lastCommentAt?.toIso8601String(), 
     };
   }
 
-  factory Task.fromMap(Map<String, dynamic> map) {
+  factory Task.fromMap(Map<String, dynamic> map, String documentId) {
     List<SubTask> loadedSubTasks = [];
-    if (map['subTasksJson'] != null) {
-      try {
-        final List<dynamic> decoded = jsonDecode(map['subTasksJson']);
-        loadedSubTasks = decoded.map((e) => SubTask.fromMap(e)).toList();
-      } catch (e) {
-        print("Hata: $e");
-      }
+    if (map['subTasks'] != null) {
+      var list = map['subTasks'] as List;
+      loadedSubTasks = list.map((e) => SubTask.fromMap(e)).toList();
     }
 
-    // String'i tekrar listeye çevir
     List<String> loadedTags = [];
-    if (map['tags'] != null && map['tags'].toString().isNotEmpty) {
-      loadedTags = map['tags'].toString().split(',');
+    if (map['tags'] != null) {
+      loadedTags = List<String>.from(map['tags']);
     }
 
     return Task(
-      id: map['id'],
+      id: documentId,
       title: map['title'] ?? '',
-      isDone: map['isDone'] == 1,
+      isDone: map['isDone'] ?? false,
       dueDate: map['dueDate'] != null ? DateTime.parse(map['dueDate']) : null,
       category: map['category'],
       priority: map['priority'] ?? 1,
       notes: map['notes'],
       projectId: map['projectId'],
+      assignedMemberId: map['assignedMemberId'],
+      creatorId: map['creatorId'],
       subTasks: loadedSubTasks,
       recurrence: map['recurrence'] ?? 'none',
-      tags: loadedTags, // YENİ
+      tags: loadedTags,
+      // YENİ: Map'ten oku
+      lastCommentAt: map['lastCommentAt'] != null ? DateTime.parse(map['lastCommentAt']) : null,
     );
   }
 }

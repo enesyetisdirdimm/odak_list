@@ -1,47 +1,277 @@
+// Dosya: lib/task_provider.dart
+
+import 'dart:async'; 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/sub_task.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/services/notification_service.dart';
 import 'package:home_widget/home_widget.dart';
-import 'package:intl/intl.dart'; // <-- İŞTE EKSİK OLAN BU SATIRDI!
-import 'package:flutter/services.dart'; // Titreşim için şart
-import 'package:audioplayers/audioplayers.dart'; // Ses için şart
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:odak_list/models/team_member.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class TaskProvider extends ChangeNotifier {
+
+  // Okunmuş görevlerin takibi
+  Map<String, DateTime> _taskLastViewed = {};
+
   final DatabaseService _dbService = DatabaseService();
   final NotificationService _notificationService = NotificationService();
-  final AudioPlayer _sfxPlayer = AudioPlayer(); // Efekt sesleri için
-
+  final AudioPlayer _sfxPlayer = AudioPlayer();
 
   List<Task> _tasks = [];
   List<Project> _projects = [];
+  List<TeamMember> _teamMembers = []; 
+  
+  // Uygulama açılışında profil kontrolü için
   bool _isLoading = true;
-
-  List<Task> get tasks => _tasks;
-  List<Project> get projects => _projects;
-  bool get isLoading => _isLoading;
-
+  
   bool _isSoundEnabled = true;
   bool _isVibrationEnabled = true;
 
+  // CANLI TAKİP İÇİN ABONELİKLER
+  StreamSubscription? _authSubscription;
+  StreamSubscription? _projectsSubscription;
+  StreamSubscription? _tasksSubscription;
+  StreamSubscription? _membersSubscription; 
+
+  // PROFİL YÖNETİMİ
+  TeamMember? _currentMember; 
+  
+  // GETTER'LAR
+  TeamMember? get currentMember => _currentMember;
+  List<TeamMember> get teamMembers => _teamMembers;
+  List<Task> get tasks => _tasks;
+  List<Project> get projects => _projects;
+  bool get isLoading => _isLoading;
   bool get isSoundEnabled => _isSoundEnabled;
   bool get isVibrationEnabled => _isVibrationEnabled;
 
+  // YETKİ KONTROLÜ
+  bool get isAdmin => _currentMember?.role == 'admin';
+
   TaskProvider() {
     _loadSettings();
-    loadData();
+    _loadReadStatus();
+    _initAuthListener(); 
   }
 
-  Future<void> _loadSettings() async {
+  // --- PROFİL İŞLEMLERİ ---
+  
+  Future<void> selectMember(TeamMember member) async {
+    _currentMember = member;
+    
+    // --- 1. FCM TOKEN İŞLEMLERİ (YENİ) ---
+    try {
+      FirebaseMessaging messaging = FirebaseMessaging.instance;
+      
+      // İzin İste (iOS için zorunlu)
+      NotificationSettings settings = await messaging.requestPermission(
+        alert: true, badge: true, sound: true,
+      );
+
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        // Token'ı al
+        String? token = await messaging.getToken();
+        if (token != null) {
+          // Veritabanına kaydet
+          await _dbService.updateMemberToken(member.id, token);
+          print("FCM Token Kaydedildi: $token");
+        }
+      }
+    } catch (e) {
+      print("Token hatası: $e");
+    }
+    // --------------------------------------
+
     final prefs = await SharedPreferences.getInstance();
-    _isSoundEnabled = prefs.getBool('sound_enabled') ?? true; // Varsayılan: Açık
-    _isVibrationEnabled = prefs.getBool('vibration_enabled') ?? true; // Varsayılan: Açık
+    await prefs.setString('saved_member_id', member.id);
+    
+    _refreshNotifications();
+    notifyListeners(); 
+  }
+
+  Future<void> logoutMember() async {
+    _currentMember = null;
+    
+    // Hafızadan sil
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('saved_member_id');
+    
+    notifyListeners();
+  }
+  
+  String? getMemberName(String? memberId) {
+    if (memberId == null) return null;
+    try {
+      return _teamMembers.firstWhere((m) => m.id == memberId).name;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // --- 1. KULLANICIYI DİNLE ---
+  void _initAuthListener() {
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user == null) {
+        _clearData();
+      } else {
+        _startListeningToData();
+      }
+    });
+  }
+
+  // --- 2. VERİLERİ CANLI DİNLE ---
+  void _startListeningToData() {
+    // Yükleme başladı, profil bulunana kadar bekle
+    _isLoading = true;
+    notifyListeners();
+
+    _projectsSubscription?.cancel();
+    _tasksSubscription?.cancel();
+    _membersSubscription?.cancel();
+
+    // 1. Ekip Üyelerini Dinle ve OTO GİRİŞ YAP
+    _membersSubscription = _dbService.getTeamMembersStream().listen((membersData) async {
+      _teamMembers = membersData;
+      
+      // Eğer seçili üye yoksa ama hafızada kayıtlıysa, otomatik seç
+      if (_currentMember == null) {
+        final prefs = await SharedPreferences.getInstance();
+        final savedId = prefs.getString('saved_member_id');
+        
+        if (savedId != null && membersData.isNotEmpty) {
+          try {
+            // Kayıtlı kişiyi bul ve seç
+            _currentMember = membersData.firstWhere((m) => m.id == savedId);
+            
+            // Profil yüklendiği için bildirimleri de tazele
+            _refreshNotifications();
+          } catch (e) {
+            // Kişi silinmiş olabilir, hafızayı temizle
+            await prefs.remove('saved_member_id');
+          }
+        }
+      }
+      
+      // Profil kontrolü bitti, ekranı açabiliriz (Diğer veriler arkadan gelse de olur)
+      _isLoading = false;
+      notifyListeners();
+    });
+
+    // 2. Projeleri Dinle
+    _projectsSubscription = _dbService.getProjectsStream().listen((projectsData) {
+      _projects = projectsData;
+      _calculateStats();
+      notifyListeners();
+    });
+
+    // 3. Görevleri Dinle ve BİLDİRİMLERİ KUR
+    _tasksSubscription = _dbService.getTasksStream().listen((tasksData) {
+      _tasks = tasksData;
+      _calculateStats();
+      _updateHomeWidget();
+      
+      // Veritabanından her veri geldiğinde bildirimleri tara
+      if (_currentMember != null) {
+        _refreshNotifications();
+      }
+
+      notifyListeners();
+    });
+  }
+
+  // Tüm görevler için bildirimleri tazele
+  void _refreshNotifications() {
+    for (var task in _tasks) {
+      _scheduleTaskNotification(task);
+    }
+  }
+
+  void _clearData() {
+    _projects = [];
+    _tasks = [];
+    _teamMembers = [];
+    _currentMember = null;
+    
+    _projectsSubscription?.cancel();
+    _tasksSubscription?.cancel();
+    _membersSubscription?.cancel();
+    
+    _isLoading = false;
     notifyListeners();
   }
 
+  void _calculateStats() {
+    if (_projects.isEmpty || _tasks.isEmpty) return;
+
+    for (var project in _projects) {
+      var projectTasks = _tasks.where((t) => t.projectId == project.id).toList();
+      project.taskCount = projectTasks.length;
+      project.completedTaskCount = projectTasks.where((t) => t.isDone).length;
+    }
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    _projectsSubscription?.cancel();
+    _tasksSubscription?.cancel();
+    _membersSubscription?.cancel();
+    super.dispose();
+  }
+
+  // --- AYARLAR VE OKUNDU BİLGİSİ ---
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _isSoundEnabled = prefs.getBool('sound_enabled') ?? true;
+    _isVibrationEnabled = prefs.getBool('vibration_enabled') ?? true;
+    notifyListeners();
+  }
+
+  Future<void> markTaskAsRead(String taskId) async {
+    final now = DateTime.now();
+    _taskLastViewed[taskId] = now; 
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('viewed_$taskId', now.toIso8601String()); 
+    
+    notifyListeners();
+  }
+
+  bool hasUnreadComments(Task task) {
+    if (task.id == null || task.lastCommentAt == null) return false;
+    
+    DateTime? lastViewed = _taskLastViewed[task.id!];
+    
+    // Eğer hiç görmediyse (null) ve yorum varsa -> UNREAD
+    if (lastViewed == null) return true; 
+    
+    return task.lastCommentAt!.isAfter(lastViewed);
+  }
+
+  Future<void> _loadReadStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys();
+    for (String key in keys) {
+      if (key.startsWith('viewed_')) {
+        String taskId = key.replaceFirst('viewed_', '');
+        String? dateStr = prefs.getString(key);
+        if (dateStr != null) {
+          _taskLastViewed[taskId] = DateTime.parse(dateStr);
+        }
+      }
+    }
+    notifyListeners();
+  }
+  
   Future<void> toggleSound(bool value) async {
     _isSoundEnabled = value;
     final prefs = await SharedPreferences.getInstance();
@@ -60,106 +290,83 @@ class TaskProvider extends ChangeNotifier {
   Future<void> _updateHomeWidget() async {
     try {
       DateTime now = DateTime.now();
-      
-      // Bugünün tüm görevlerini bul (Tamamlanan + Bekleyen)
-      var todayTasks = _tasks.where((t) {
-        if (t.dueDate == null) return false;
-        return t.dueDate!.year == now.year && 
-               t.dueDate!.month == now.month && 
-               t.dueDate!.day == now.day;
-      }).toList();
-
-      int total = todayTasks.length;
-      int done = todayTasks.where((t) => t.isDone).length;
-      
-      // Tarih formatı (örn: 27 Kasım, Çarşamba)
-      // initializeDateFormatting'i main'de çağırdığımız için burada çalışır
+      int total = _tasks.length;
+      int done = _tasks.where((t) => t.isDone).length;
       String dateStr = DateFormat('d MMMM, EEEE', 'tr_TR').format(now);
 
-      // Verileri Gönder
+      await HomeWidget.saveWidgetData<String>('title', 'OdakList');
       await HomeWidget.saveWidgetData<String>('date_str', dateStr);
       await HomeWidget.saveWidgetData<int>('done_count', done);
       await HomeWidget.saveWidgetData<int>('total_count', total);
-      
-      await HomeWidget.updateWidget(
-        name: 'OdakWidget',
-        androidName: 'OdakWidget',
-      );
-    } catch (e) {
-      debugPrint("Widget güncelleme hatası: $e");
-    }
+      await HomeWidget.updateWidget(name: 'OdakWidget', androidName: 'OdakWidget');
+    } catch (e) {}
   }
 
-  // --- VERİLERİ YÜKLE ---
-  Future<void> loadData() async {
-    _isLoading = true;
-    final fetchedProjects = await _dbService.getProjectsWithStats();
-    final fetchedTasks = await _dbService.getTasks();
-
-    _projects = fetchedProjects;
-    _tasks = fetchedTasks;
-    _isLoading = false;
-    
-    // Veri her yüklendiğinde Widget'ı da güncelle
-    _updateHomeWidget();
-    
-    notifyListeners();
-  }
-
-  // --- GÖREV İŞLEMLERİ ---
-
+  // --- GÖREV İŞLEMLERİ (CRUD) ---
+  
   Future<void> addTask(Task task) async {
+    // DÜZELTME: creatorId artık Profil ID'si değil, ANA HESAP ID'si (Auth UID) olacak.
+    // Böylece Cloud Function "users/{uid}" yolunu doğru bulabilecek.
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      task.creatorId = user.uid;
+    }
+    
     Task createdTask = await _dbService.createTask(task);
-    _scheduleTaskNotification(createdTask);
-    await loadData();
+    
+    // Loglama kısmında ismini kullanmaya devam edebiliriz (Bu sadece yazı)
+    if (_currentMember != null) {
+      await _dbService.addActivityLog(
+        createdTask.id!, 
+        _currentMember!.name, 
+        "Görevi oluşturdu."
+      );
+    }
   }
 
   Future<void> updateTask(Task task) async {
     await _dbService.updateTask(task);
-    _scheduleTaskNotification(task);
-    await loadData();
   }
 
-  Future<void> deleteTask(int id) async {
+  Future<void> deleteTask(String id) async {
     await _dbService.deleteTask(id);
-    await _notificationService.cancelNotification(id);
-    await loadData();
+    await _notificationService.cancelNotification(id.hashCode);
   }
 
-  // --- GÖREV DURUMUNU DEĞİŞTİR (TEKRAR MANTIĞI) ---
- Future<void> toggleTaskStatus(Task task) async {
-    // 1. TİTREŞİM VE SES EFEKTİ (Kontrollü)
-    if (!task.isDone) {
-      // Görev tamamlanıyorsa
-      
-      // TİTREŞİM AÇIKSA TİTRE
-      if (_isVibrationEnabled) {
-        HapticFeedback.heavyImpact(); 
-      }
+  bool canCompleteTask(Task task) {
+    if (isAdmin) return true;
+    if (task.assignedMemberId == null) return true;
+    return task.assignedMemberId == _currentMember?.id;
+  }
 
-      // SES AÇIKSA ÇAL
+  Future<void> toggleTaskStatus(Task task) async {
+    // Otomatik Sahiplenme
+    if (!task.isDone && task.assignedMemberId == null && _currentMember != null) {
+      task.assignedMemberId = _currentMember!.id;
+    }
+
+    if (!task.isDone) {
+      if (_isVibrationEnabled) HapticFeedback.heavyImpact();
       if (_isSoundEnabled) {
         try {
           await _sfxPlayer.stop();
           await _sfxPlayer.setSource(AssetSource('sounds/success.mp3'));
           await _sfxPlayer.resume();
-        } catch (e) {
-          // Ses hatası
-        }
+        } catch (e) {}
       }
-
     } else {
-      // Görev geri alınıyorsa (Sadece hafif titreşim, eğer açıksa)
-      if (_isVibrationEnabled) {
-        HapticFeedback.lightImpact();
-      }
+      if (_isVibrationEnabled) HapticFeedback.lightImpact();
     }
 
-    // 2. NORMAL MANTIK (Aynı kalacak)
+    // Tekrarlayan Görevler
     if (!task.isDone && task.recurrence != 'none' && task.dueDate != null) {
       task.isDone = true;
       await _dbService.updateTask(task); 
-      await _notificationService.cancelNotification(task.id!);
+      await _notificationService.cancelNotification(task.id!.hashCode);
+      
+      if (task.id != null && _currentMember != null) {
+         await _dbService.addActivityLog(task.id!, _currentMember!.name, "Görevi tamamladı (Tekrarlandı).");
+      }
 
       DateTime nextDate = task.dueDate!;
       switch (task.recurrence) {
@@ -176,26 +383,52 @@ class TaskProvider extends ChangeNotifier {
         priority: task.priority,
         notes: task.notes,
         projectId: task.projectId,
+        assignedMemberId: task.assignedMemberId,
+        creatorId: task.creatorId,
         recurrence: task.recurrence,
         tags: List.from(task.tags),
         subTasks: task.subTasks.map((s) => SubTask(title: s.title, isDone: false)).toList(),
       );
       await addTask(newTask); 
     } else {
+      // Normal Görev
+      bool isNowDone = !task.isDone;
       task.isDone = !task.isDone;
       await updateTask(task);
+
+      if (task.id != null && _currentMember != null) {
+         await _dbService.addActivityLog(
+           task.id!, 
+           _currentMember!.name, 
+           isNowDone ? "Görevi tamamladı. ✅" : "Görevi tekrar açtı."
+         );
+      }
     }
   }
 
-  // --- BİLDİRİM AYARLA ---
+  // --- BİLDİRİM MANTIĞI ---
   Future<void> _scheduleTaskNotification(Task task) async {
-    await _notificationService.cancelNotification(task.id!);
+    if (task.id == null) return;
     
-    if (!task.isDone && task.dueDate != null && task.dueDate!.isAfter(DateTime.now())) {
+    // Önce mevcutsa iptal et
+    await _notificationService.cancelNotification(task.id!.hashCode);
+    
+    // Geçmiş veya tamamlanmışlara kurma
+    if (task.isDone || task.dueDate == null || task.dueDate!.isBefore(DateTime.now())) {
+      return;
+    }
+
+    // FİLTRE: Sadece bana aitse veya havuzdaysa
+    bool isAssignedToMe = task.assignedMemberId == _currentMember?.id;
+    bool isUnassigned = task.assignedMemberId == null;
+
+    if (isAssignedToMe || isUnassigned) {
       await _notificationService.scheduleNotification(
-        id: task.id!,
+        id: task.id!.hashCode,
         title: task.recurrence != 'none' ? "Tekrarlayan: ${task.title}" : "Hatırlatıcı: ${task.title}",
-        body: "Görevinizin zamanı geldi!",
+        body: isAssignedToMe 
+            ? "Bu görev senin sorumluluğunda, zamanı geldi!" 
+            : "Havuzdaki bir görevin zamanı geldi!",
         scheduledTime: task.dueDate!,
       );
     }
@@ -204,11 +437,9 @@ class TaskProvider extends ChangeNotifier {
   // --- PROJE İŞLEMLERİ ---
   Future<void> addProject(Project project) async {
     await _dbService.createProject(project);
-    await loadData();
   }
 
-  Future<void> deleteProject(int id) async {
+  Future<void> deleteProject(String id) async {
     await _dbService.deleteProject(id);
-    await loadData();
   }
 }

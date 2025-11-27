@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:odak_list/models/project.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/theme_provider.dart';
+import 'package:odak_list/task_provider.dart'; // Provider'ı ekledik
 import 'package:odak_list/utils/app_colors.dart';
 import 'package:provider/provider.dart';
 
@@ -14,27 +15,9 @@ class ProjectsScreen extends StatefulWidget {
 }
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
-  List<Project> _projects = [];
-  bool isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadProjects();
-  }
-
-  Future<void> _loadProjects() async {
-    final projects = await widget.dbService.getProjectsWithStats();
-    if (mounted) {
-      setState(() {
-        _projects = projects;
-        isLoading = false;
-      });
-    }
-  }
-
-  // Proje Ekleme (Ana ekrandakiyle aynı mantık)
-  void _showAddProjectDialog() {
+  
+  // Proje Ekleme Diyaloğu
+  void _showAddProjectDialog(TaskProvider taskProvider) {
     final controller = TextEditingController();
     final List<Color> colors = [
       Colors.blue, Colors.red, Colors.green, Colors.orange, Colors.purple, Colors.teal, Colors.pink, Colors.indigo
@@ -52,23 +35,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
-                  controller: controller,
-                  decoration: const InputDecoration(hintText: "Proje Adı"),
-                ),
+                TextField(controller: controller, decoration: const InputDecoration(hintText: "Proje Adı")),
                 const SizedBox(height: 16),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: 8, runSpacing: 8,
                   children: colors.map((color) => GestureDetector(
                     onTap: () => setState(() => selectedColor = color),
                     child: Container(
                       width: 30, height: 30,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: selectedColor == color ? Border.all(width: 3, color: Colors.black) : null
-                      ),
+                      decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: selectedColor == color ? Border.all(width: 3, color: Colors.black) : null),
                     ),
                   )).toList(),
                 )
@@ -77,14 +52,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
               ElevatedButton(
-                onPressed: () async {
+                onPressed: () {
                   if (controller.text.isNotEmpty) {
-                    await widget.dbService.createProject(Project(
-                      title: controller.text,
-                      colorValue: selectedColor.value
-                    ));
+                    // Provider üzerinden ekliyoruz
+                    taskProvider.addProject(Project(title: controller.text, colorValue: selectedColor.value));
                     Navigator.pop(ctx);
-                    _loadProjects(); // Listeyi yenile
                   }
                 },
                 child: const Text("Oluştur"),
@@ -101,127 +73,98 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
-    final cardColor = Theme.of(context).cardColor;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text("Tüm Projeler", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
-        centerTitle: true,
-        iconTheme: IconThemeData(color: textColor),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.add, color: themeProvider.secondaryColor),
-            onPressed: _showAddProjectDialog,
-          )
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _projects.isEmpty
-              ? Center(child: Text("Henüz proje yok", style: TextStyle(color: textColor)))
-              : GridView.builder(
-                  padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2, // Yan yana 2 kutu
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    childAspectRatio: 1.1, // Kutuların kareye yakın olması için
-                  ),
-                  itemCount: _projects.length,
-                  itemBuilder: (context, index) {
-                    final project = _projects[index];
-                    return GestureDetector(
-                      onTap: () {
-                        // Seçilen projeyi Ana Ekrana gönder ve geri dön
-                        Navigator.pop(context, project.id);
-                      },
-                      onLongPress: () {
-                        // Silme İşlemi
-                        showDialog(context: context, builder: (ctx) => AlertDialog(
-                          title: const Text("Projeyi Sil"),
-                          content: const Text("Silmek istediğine emin misin?"),
-                          actions: [
-                            TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("İptal")),
-                            TextButton(
-                              onPressed: () async {
-                                await widget.dbService.deleteProject(project.id!);
-                                Navigator.pop(ctx);
-                                _loadProjects();
-                              }, 
-                              child: const Text("Sil", style: TextStyle(color: Colors.red))
+    // CANLI VERİ DİNLEME (Consumer)
+    return Consumer<TaskProvider>(
+      builder: (context, taskProvider, child) {
+        final projects = taskProvider.projects;
+        final isLoading = taskProvider.isLoading;
+
+        return Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          appBar: AppBar(
+            title: Text("Projeler", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            iconTheme: IconThemeData(color: textColor),
+          ),
+          body: isLoading 
+              ? const Center(child: CircularProgressIndicator())
+              : projects.isEmpty
+                  ? Center(child: Text("Henüz proje yok.", style: TextStyle(color: Colors.grey)))
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(20),
+                      itemCount: projects.length,
+                      itemBuilder: (context, index) {
+                        final project = projects[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).cardColor,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: isDarkMode ? [] : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
                             ),
-                          ],
-                        ));
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: cardColor,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: isDarkMode ? [] : [
-                            BoxShadow(color: Color(project.colorValue).withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))
-                          ],
-                          border: Border.all(
-                            color: isDarkMode ? Colors.white10 : Colors.transparent,
-                          )
-                        ),
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            // Üst Kısım: İkon ve Menü
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            child: Row(
                               children: [
                                 Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: Color(project.colorValue).withOpacity(0.2),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(Icons.folder, color: Color(project.colorValue)),
+                                  width: 12, height: 12,
+                                  decoration: BoxDecoration(color: Color(project.colorValue), shape: BoxShape.circle),
                                 ),
-                                Text("${(project.progress * 100).toInt()}%", style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
-                              ],
-                            ),
-                            
-                            // Alt Kısım: İsim ve Görev Sayısı
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  project.title,
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        project.title,
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        "${project.taskCount} Görev (${project.completedTaskCount} Tamamlandı)",
+                                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      // İlerleme Çubuğu
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: LinearProgressIndicator(
+                                          value: project.progress,
+                                          backgroundColor: Color(project.colorValue).withOpacity(0.1),
+                                          valueColor: AlwaysStoppedAnimation<Color>(Color(project.colorValue)),
+                                          minHeight: 4,
+                                        ),
+                                      )
+                                    ],
+                                  )
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  "${project.taskCount} Görev",
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                                ),
-                                const SizedBox(height: 8),
-                                // Minik Progress Bar
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: LinearProgressIndicator(
-                                    value: project.progress,
-                                    backgroundColor: Color(project.colorValue).withOpacity(0.1),
-                                    valueColor: AlwaysStoppedAnimation<Color>(Color(project.colorValue)),
-                                    minHeight: 4,
-                                  ),
+                                if (taskProvider.isAdmin)
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                  onPressed: () {
+                                     // Silme işlemi Provider üzerinden
+                                     taskProvider.deleteProject(project.id!);
+                                  },
                                 )
                               ],
-                            )
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+          floatingActionButton: taskProvider.isAdmin 
+            ? FloatingActionButton(
+                onPressed: () => _showAddProjectDialog(taskProvider),
+                backgroundColor: themeProvider.secondaryColor,
+                child: const Icon(Icons.add, color: Colors.white),
+              )
+            : null,
+        );
+      },
     );
   }
 }

@@ -13,7 +13,7 @@ dependencies:
   # --- UYUMLU PAKET LİSTESİ ---
   
   # sqflite 2.3.0 yerine 2.3.2 sürümünü kullanıyoruz (Daha kararlı)
-  sqflite: ^2.3.2
+  # sqflite: ^2.3.2
   
   path: ^1.9.0
   intl: ^0.19.0
@@ -40,6 +40,11 @@ dependencies:
   home_widget: ^0.8.1
   # Wakelock'u güncelledik (Eskiden 1.1.2 idi, 1.2.0 yaptık)
   wakelock_plus: 1.2.0
+
+  firebase_core: ^2.27.0  # Firebase Beyni
+  firebase_auth: ^4.17.8  # Giriş/Kayıt işlemleri
+  cloud_firestore: ^4.15.8
+  firebase_messaging: ^14.7.19
   
   # Speech to text (Hata verirse 6.3.0'a çekeriz ama şimdilik kalsın)
  # speech_to_text: ^6.6.2

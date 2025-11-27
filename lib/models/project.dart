@@ -1,10 +1,9 @@
 class Project {
-  int? id;
+  String? id; // ARTIK STRING
   String title;
-  int colorValue; // Rengi integer olarak saklayacağız (örn: 0xFF...)
+  int colorValue;
 
-  // Bu alanlar veritabanında fiziksel olarak yok,
-  // SQL sorgusuyla anlık hesaplayıp dolduracağız.
+  // Bu alanlar veritabanında tutulmaz, hesaplanır
   int taskCount;
   int completedTaskCount;
 
@@ -16,7 +15,6 @@ class Project {
     this.completedTaskCount = 0,
   });
 
-  // İlerleme oranı (0.0 ile 1.0 arası)
   double get progress {
     if (taskCount == 0) return 0.0;
     return completedTaskCount / taskCount;
@@ -24,19 +22,17 @@ class Project {
 
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
       'title': title,
       'colorValue': colorValue,
     };
   }
 
-  factory Project.fromMap(Map<String, dynamic> map) {
+  // Firestore'dan gelen veriyi (Map + ID) modele çevirir
+  factory Project.fromMap(Map<String, dynamic> map, String documentId) {
     return Project(
-      id: map['id'],
-      title: map['title'],
-      colorValue: map['colorValue'],
-      taskCount: map['taskCount'] ?? 0,
-      completedTaskCount: map['completedTaskCount'] ?? 0,
+      id: documentId,
+      title: map['title'] ?? '',
+      colorValue: map['colorValue'] ?? 0xFF42A5F5,
     );
   }
 }

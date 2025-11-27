@@ -4,10 +4,11 @@ plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services")
 }
 
 android {
-    namespace = "com.example.odak_list"
+    namespace = "com.mrenes.odaklist"
     compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
@@ -23,7 +24,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.odak_list"
+        applicationId = "com.mrenes.odaklist"
         
         // MİNİMUM SDK 21 OLMALI
         minSdk = flutter.minSdkVersion

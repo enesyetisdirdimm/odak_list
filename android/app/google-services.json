@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "873035973416",
+    "project_id": "odaklist",
+    "storage_bucket": "odaklist.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:873035973416:android:e93852140d477951cc061d",
+        "android_client_info": {
+          "package_name": "com.mrenes.odaklist"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCyU9qkIJmkLegQixZlP8XBfp4x4alj074"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

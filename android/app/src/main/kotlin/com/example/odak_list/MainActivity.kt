@@ -1,4 +1,4 @@
-package com.example.odak_list
+package com.mrenes.odaklist
 
 import io.flutter.embedding.android.FlutterActivity
 

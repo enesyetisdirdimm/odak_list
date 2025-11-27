@@ -1,4 +1,4 @@
-package com.example.odak_list
+package com.mrenes.odaklist
 
 import android.appwidget.AppWidgetManager
 import android.content.Context

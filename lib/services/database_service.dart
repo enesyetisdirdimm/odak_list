@@ -1,150 +1,184 @@
-import 'package:odak_list/models/project.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:odak_list/models/activity_log.dart';
+import 'package:odak_list/models/comment.dart';
 import 'package:odak_list/models/task.dart';
-import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:odak_list/models/project.dart';
+import 'package:odak_list/models/team_member.dart';
+import 'package:odak_list/models/activity_log.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
   factory DatabaseService() => _instance;
   DatabaseService._internal();
 
-  static Database? _database;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDB();
-    return _database!;
-  }
+  // --- ORTAK PROJE VE GÖREVLER (HERKES GÖRÜR) ---
+  CollectionReference get _projectsRef => _db.collection('projects');
+  CollectionReference get _tasksRef => _db.collection('tasks');
 
-  Future<Database> _initDB() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
-    // Yeni yapı için ismini değiştirdim, temiz başlasın.
-    final path = join(documentsDirectory.path, 'odak_pro_v1.db'); 
-
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _onCreate,
-    );
-  }
-
-Future<void> _onCreate(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE projects (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        colorValue INTEGER NOT NULL
-      )
-    ''');
-
-    // tags SÜTUNU EKLENDİ (TEXT olarak)
-    await db.execute('''
-      CREATE TABLE tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        isDone INTEGER NOT NULL DEFAULT 0,
-        dueDate TEXT,
-        category TEXT,
-        priority INTEGER NOT NULL DEFAULT 1,
-        notes TEXT,
-        subTasksJson TEXT,
-        projectId INTEGER,
-        recurrence TEXT DEFAULT 'none',
-        tags TEXT 
-      )
-    ''');
-
-    await db.insert('projects', {
-      'title': 'Genel', 
-      'colorValue': 0xFF42A5F5
+  // --- CANLI VERİ AKIŞLARI ---
+  Stream<List<Project>> getProjectsStream() {
+    return _projectsRef.snapshots().map((snapshot) {
+      return snapshot.docs
+          .map((doc) => Project.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+          .toList();
     });
   }
 
-  // --- PROJE İŞLEMLERİ ---
-
-  Future<int> createProject(Project project) async {
-    final db = await database;
-    return await db.insert('projects', project.toMap());
+  Stream<List<Task>> getTasksStream() {
+    return _tasksRef.snapshots().map((snapshot) {
+      return snapshot.docs
+          .map((doc) => Task.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+          .toList();
+    });
   }
 
-  Future<void> deleteProject(int id) async {
-    final db = await database;
-    await db.delete('projects', where: 'id = ?', whereArgs: [id]);
-    // Proje silinince görevleri de silinsin mi? Şimdilik "Genel" yapalım veya silelim.
-    // Biz görevleri silmeyi tercih edelim:
-    await db.delete('tasks', where: 'projectId = ?', whereArgs: [id]);
+  // --- YAZMA İŞLEMLERİ ---
+  Future<void> createProject(Project project) async {
+    await _projectsRef.add(project.toMap());
   }
 
-  // Bu fonksiyon çok önemli: Projeleri ve istatistiklerini getirir
-  Future<List<Project>> getProjectsWithStats() async {
-    final db = await database;
-    final List<Map<String, dynamic>> result = await db.rawQuery('''
-      SELECT 
-        p.id, 
-        p.title, 
-        p.colorValue,
-        (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id) as taskCount,
-        (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDone = 1) as completedTaskCount
-      FROM projects p
-    ''');
-    return List.generate(result.length, (i) => Project.fromMap(result[i]));
+  Future<void> deleteProject(String id) async {
+    await _projectsRef.doc(id).delete();
+    var tasks = await _tasksRef.where('projectId', isEqualTo: id).get();
+    for (var doc in tasks.docs) {
+      await doc.reference.delete();
+    }
   }
-
-  // --- GÖREV İŞLEMLERİ ---
 
   Future<Task> createTask(Task task) async {
-    final db = await database;
-    final id = await db.insert('tasks', task.toMap());
-    task.id = id;
+    var ref = await _tasksRef.add(task.toMap());
+    task.id = ref.id;
     return task;
   }
 
-  Future<List<Task>> getTasks() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'tasks',
-      orderBy: 'isDone ASC, priority DESC, dueDate ASC',
-    );
-    return List.generate(maps.length, (i) => Task.fromMap(maps[i]));
-  }
-
-  // Sadece belirli projenin görevlerini getir
-  Future<List<Task>> getTasksByProject(int projectId) async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'tasks',
-      where: 'projectId = ?',
-      whereArgs: [projectId],
-      orderBy: 'isDone ASC, priority DESC',
-    );
-    return List.generate(maps.length, (i) => Task.fromMap(maps[i]));
-  }
-
   Future<void> updateTask(Task task) async {
-    final db = await database;
-    await db.update(
-      'tasks',
-      task.toMap(),
-      where: 'id = ?',
-      whereArgs: [task.id],
-    );
+    if (task.id == null) return;
+    await _tasksRef.doc(task.id).update(task.toMap());
   }
 
-  Future<void> deleteTask(int id) async {
-    final db = await database;
-    await db.delete('tasks', where: 'id = ?', whereArgs: [id]);
+  Future<void> deleteTask(String id) async {
+    await _tasksRef.doc(id).delete();
   }
 
-  Future<String> getDatabasePath() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
-    return join(documentsDirectory.path, 'odak_pro_v1.db');
+  // --- EKİP PROFİL YÖNETİMİ ---
+
+  // Profilleri Getir
+  Stream<List<TeamMember>> getTeamMembersStream() {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return Stream.value([]);
+
+    return _db.collection('users').doc(uid).collection('members').snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) => TeamMember.fromMap(doc.data(), doc.id)).toList();
+    });
   }
 
-  // 2. Veritabanını Kapat (Geri yükleme yaparken şart)
-  Future<void> close() async {
-    final db = await database;
-    await db.close();
-    _database = null; // Instance'ı sıfırla ki tekrar açabilsin
+  // Yeni Profil Ekle
+  Future<void> addTeamMember(String name, String role, String? pin) async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    await _db.collection('users').doc(uid).collection('members').add({
+      'name': name,
+      'role': role,
+      'profilePin': pin,
+    });
+  }
+
+  // Profil Rolünü Güncelle (YENİ EKLENDİ)
+  Future<void> updateTeamMemberRole(String memberId, String newRole) async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    await _db.collection('users').doc(uid).collection('members').doc(memberId).update({'role': newRole});
+  }
+
+  // Profil Sil
+  Future<void> deleteTeamMember(String memberId) async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    // 1. Önce kişinin üzerindeki görevleri bul ve havuza at (assignedMemberId = null yap)
+    // Not: Bu işlem biraz maliyetlidir ama veri tutarlılığı için şarttır.
+    final tasksQuery = await _tasksRef.where('assignedMemberId', isEqualTo: memberId).get();
+    
+    WriteBatch batch = _db.batch();
+    
+    for (var doc in tasksQuery.docs) {
+      batch.update(doc.reference, {'assignedMemberId': null});
+    }
+    
+    // 2. Kişiyi sil
+    DocumentReference memberRef = _db.collection('users').doc(uid).collection('members').doc(memberId);
+    batch.delete(memberRef);
+
+    // 3. Tüm işlemleri tek seferde uygula
+    await batch.commit();
+  }
+  
+  // İlk kurulum (HATA BURADAYDI, DÜZELDİ)
+  Future<void> createInitialAdminProfile(String name, String pin) async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    
+    var members = await _db.collection('users').doc(uid).collection('members').get();
+    if (members.docs.isEmpty) {
+      // İlk profili oluştur: ADMİN ve ŞİFRELİ
+      await addTeamMember(name, 'admin', pin); 
+    }
+  }
+
+  Future<void> addActivityLog(String taskId, String userName, String action) async {
+    await _tasksRef.doc(taskId).collection('logs').add({
+      'userName': userName,
+      'action': action,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+
+  // Bir görevin loglarını getir (Tarihe göre sıralı)
+  Stream<List<ActivityLog>> getTaskLogs(String taskId) {
+    return _tasksRef
+        .doc(taskId)
+        .collection('logs')
+        .orderBy('timestamp', descending: true) // En yeni en üstte
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => ActivityLog.fromMap(doc.data(), doc.id))
+            .toList());
+  }
+
+  Future<void> addComment(String taskId, Comment comment) async {
+    // 1. Yorumu ekle
+    await _tasksRef.doc(taskId).collection('comments').add(comment.toMap());
+    
+    // 2. Görevin "lastCommentAt" alanını güncelle
+    await _tasksRef.doc(taskId).update({
+      'lastCommentAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  // Yorumları Getir
+  Stream<List<Comment>> getTaskComments(String taskId) {
+    return _tasksRef
+        .doc(taskId)
+        .collection('comments')
+        .orderBy('timestamp', descending: true) // En yeni en altta (Chat mantığı için ters sıralama da yapılabilir ama standart liste yapalım)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => Comment.fromMap(doc.data(), doc.id))
+            .toList());
+  }
+
+  Future<void> updateMemberToken(String memberId, String token) async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    
+    // Üyenin dökümanına 'fcmToken' alanını ekle/güncelle
+    await _db.collection('users').doc(uid).collection('members').doc(memberId).update({
+      'fcmToken': token,
+    });
   }
 }
