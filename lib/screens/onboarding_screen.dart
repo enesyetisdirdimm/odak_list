@@ -1,6 +1,8 @@
+// Dosya: lib/screens/onboarding_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:odak_list/services/database_service.dart';
-import 'package:odak_list/screens/navigation_screen.dart';
+import 'package:odak_list/screens/login_screen.dart'; // YENİ: Login ekranı import edildi
 import 'package:shared_preferences/shared_preferences.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -19,12 +21,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     {
       "title": "OdakList'e Hoşgeldin!",
       "desc": "Görevlerini planla, projelerini yönet ve hayatını düzene sok.",
-      "image": "assets/icon.png" // Geçici olarak ikonu kullanıyoruz
+      "image": "assets/icon.png" 
     },
     {
       "title": "Odaklan & Başar",
       "desc": "Pomodoro tekniği ve özel odak sesleri ile verimliliğini artır.",
-      "icon": "timer" // İkon kullanacağız
+      "icon": "timer"
     },
     {
       "title": "Asla Unutma",
@@ -38,9 +40,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     await prefs.setBool('seenOnboarding', true); // "Gördüm" diye işaretle
 
     if (!mounted) return;
+    
+    // YENİ: Artık direkt Login ekranına gidiyor
     Navigator.pushReplacement(
       context, 
-      MaterialPageRoute(builder: (context) => NavigationScreen(dbService: widget.dbService))
+      MaterialPageRoute(builder: (context) => const LoginScreen())
     );
   }
 

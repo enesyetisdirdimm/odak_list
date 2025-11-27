@@ -1,3 +1,5 @@
+// Dosya: lib/services/database_service.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:odak_list/models/activity_log.dart';
@@ -5,7 +7,6 @@ import 'package:odak_list/models/comment.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/team_member.dart';
-import 'package:odak_list/models/activity_log.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -88,7 +89,7 @@ class DatabaseService {
     });
   }
 
-  // Profil Rolünü Güncelle (YENİ EKLENDİ)
+  // Profil Rolünü Güncelle
   Future<void> updateTeamMemberRole(String memberId, String newRole) async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
@@ -101,7 +102,6 @@ class DatabaseService {
     if (uid == null) return;
 
     // 1. Önce kişinin üzerindeki görevleri bul ve havuza at (assignedMemberId = null yap)
-    // Not: Bu işlem biraz maliyetlidir ama veri tutarlılığı için şarttır.
     final tasksQuery = await _tasksRef.where('assignedMemberId', isEqualTo: memberId).get();
     
     WriteBatch batch = _db.batch();
@@ -118,18 +118,18 @@ class DatabaseService {
     await batch.commit();
   }
   
-  // İlk kurulum (HATA BURADAYDI, DÜZELDİ)
+  // İlk kurulum
   Future<void> createInitialAdminProfile(String name, String pin) async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
     
     var members = await _db.collection('users').doc(uid).collection('members').get();
     if (members.docs.isEmpty) {
-      // İlk profili oluştur: ADMİN ve ŞİFRELİ
       await addTeamMember(name, 'admin', pin); 
     }
   }
 
+  // --- AKTİVİTE GÜNLÜĞÜ ---
   Future<void> addActivityLog(String taskId, String userName, String action) async {
     await _tasksRef.doc(taskId).collection('logs').add({
       'userName': userName,
@@ -138,18 +138,19 @@ class DatabaseService {
     });
   }
 
-  // Bir görevin loglarını getir (Tarihe göre sıralı)
+  // Bir görevin loglarını getir
   Stream<List<ActivityLog>> getTaskLogs(String taskId) {
     return _tasksRef
         .doc(taskId)
         .collection('logs')
-        .orderBy('timestamp', descending: true) // En yeni en üstte
+        .orderBy('timestamp', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
             .map((doc) => ActivityLog.fromMap(doc.data(), doc.id))
             .toList());
   }
 
+  // --- YORUMLAR ---
   Future<void> addComment(String taskId, Comment comment) async {
     // 1. Yorumu ekle
     await _tasksRef.doc(taskId).collection('comments').add(comment.toMap());
@@ -165,13 +166,14 @@ class DatabaseService {
     return _tasksRef
         .doc(taskId)
         .collection('comments')
-        .orderBy('timestamp', descending: true) // En yeni en altta (Chat mantığı için ters sıralama da yapılabilir ama standart liste yapalım)
+        .orderBy('timestamp', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
             .map((doc) => Comment.fromMap(doc.data(), doc.id))
             .toList());
   }
 
+  // --- FCM TOKEN ---
   Future<void> updateMemberToken(String memberId, String token) async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
@@ -180,5 +182,34 @@ class DatabaseService {
     await _db.collection('users').doc(uid).collection('members').doc(memberId).update({
       'fcmToken': token,
     });
+  }
+
+  // --- PREMIUM İŞLEMLERİ (DÜZELTİLDİ) ---
+
+  // Hesabı Premium Yap
+  Future<void> activatePremium() async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    // DÜZELTME: .update() yerine .set() kullanıyoruz.
+    // SetOptions(merge: true) sayesinde varsa günceller, yoksa oluşturur.
+    // Böylece "Document not found" (Hayalet döküman) hatası çözülür.
+    await _db.collection('users').doc(uid).set({
+      'isPremium': true,
+      'premiumSince': DateTime.now().toIso8601String(),
+    }, SetOptions(merge: true));
+  }
+  
+  // Premium Durumunu Kontrol Et
+  Future<bool> checkPremiumStatus() async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return false;
+
+    var doc = await _db.collection('users').doc(uid).get();
+    // Hem döküman var mı hem de isPremium true mu diye bak
+    if (doc.exists && doc.data() != null && doc.data()!.containsKey('isPremium')) {
+      return doc.data()!['isPremium'] == true;
+    }
+    return false;
   }
 }
