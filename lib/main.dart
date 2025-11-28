@@ -18,6 +18,8 @@ import 'package:odak_list/screens/login_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:odak_list/screens/profile_select_screen.dart';
+import 'package:odak_list/services/purchase_api.dart';
+import 'package:odak_list/screens/verify_email_screen.dart';
 
 Future<void> _configureLocalTimeZone() async {
   tz.initializeTimeZones();
@@ -39,6 +41,7 @@ void main() async {
   
   try {
     await Firebase.initializeApp();
+    await PurchaseApi.init();
   } catch (e) {
     print("Firebase başlatma hatası: $e");
   }
@@ -124,28 +127,28 @@ class MyApp extends StatelessWidget {
       home: StreamBuilder<User?>(
         stream: AuthService().authStateChanges,
         builder: (context, snapshot) {
-          // 1. Kullanıcı henüz giriş yapmamışsa -> LOGIN
+          // 1. Giriş Yoksa -> Login
           if (!snapshot.hasData) {
-            // Eğer onboarding gösterilmemişse önce onu göster, sonra login
             if (startScreen is OnboardingScreen) return startScreen;
             return const LoginScreen();
           }
 
-          // 2. Kullanıcı giriş yapmışsa -> PROFİL DURUMUNA BAK (Consumer)
+          // 2. Giriş Var ama MAIL DOĞRULANMAMIŞSA -> Verify Screen
+          // Not: emailVerified bazen cache'den false gelebilir, reload yapmak gerekebilir
+          // ama güvenlik için burada bloklamak en iyisidir.
+          if (!snapshot.data!.emailVerified) {
+             return const VerifyEmailScreen();
+          }
+
+          // 3. Giriş Var ve Mail Doğrulanmışsa -> PROFİL DURUMUNA BAK
           return Consumer<TaskProvider>(
             builder: (context, taskProvider, child) {
-              
-              // Veriler yükleniyorsa bekle
               if (taskProvider.isLoading) {
                 return const Scaffold(body: Center(child: CircularProgressIndicator()));
               }
-
-              // Profil otomatik seçilmişse (Hafızadan geldi) -> ANA EKRAN
               if (taskProvider.currentMember != null) {
                 return NavigationScreen(dbService: dbService);
               }
-
-              // Seçili profil yoksa -> PROFİL SEÇİMİ
               return const ProfileSelectScreen();
             },
           );

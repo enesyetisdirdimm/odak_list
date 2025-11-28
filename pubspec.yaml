@@ -45,7 +45,10 @@ dependencies:
   firebase_auth: ^4.17.8  # Giriş/Kayıt işlemleri
   cloud_firestore: ^4.15.8
   firebase_messaging: ^14.7.19
-  
+
+  firebase_storage: ^11.6.0 # Dosya depolama
+  cached_network_image: ^3.3.1 # Resimleri hızlı yüklemek için (Opsiyonel ama önerilir)
+  purchases_flutter: ^8.0.0
   # Speech to text (Hata verirse 6.3.0'a çekeriz ama şimdilik kalsın)
  # speech_to_text: ^6.6.2
 
@@ -71,6 +74,7 @@ flutter:
 
   assets:
     - assets/sounds/
+    - assets/
 
 flutter_launcher_icons:
   android: "launcher_icon"

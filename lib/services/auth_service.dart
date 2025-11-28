@@ -1,3 +1,5 @@
+// Dosya: lib/services/auth_service.dart
+
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AuthService {
@@ -19,7 +21,7 @@ class AuthService {
     }
   }
 
-  // --- KAYIT OL (Sadece Auth Hesabı Oluşturur) ---
+  // --- KAYIT OL ---
   Future<User?> signUp(String email, String password, String name) async {
     try {
       // 1. Kullanıcıyı oluştur
@@ -38,6 +40,25 @@ class AuthService {
     } catch (e) {
       throw Exception("Kayıt oluşturulamadı: ${e.toString()}");
     }
+  }
+
+  // --- DOĞRULAMA MAİLİ GÖNDER (YENİ) ---
+  Future<void> sendEmailVerification() async {
+    User? user = _auth.currentUser;
+    if (user != null && !user.emailVerified) {
+      await user.sendEmailVerification();
+    }
+  }
+
+  // --- DOĞRULAMA DURUMUNU KONTROL ET (YENİ) ---
+  // Firebase verisi anlık güncellenmez, elle reload yapıp kontrol etmeliyiz.
+  Future<bool> checkEmailVerified() async {
+    User? user = _auth.currentUser;
+    if (user != null) {
+      await user.reload(); // Sunucudan son durumu çek
+      return _auth.currentUser!.emailVerified;
+    }
+    return false;
   }
 
   // --- ÇIKIŞ YAP ---
@@ -67,6 +88,14 @@ class AuthService {
     if (user != null) {
       await user.updateDisplayName(newName);
       await user.reload();
+    }
+  }
+
+  Future<void> sendPasswordResetEmail(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+    } catch (e) {
+      throw Exception("Sıfırlama maili gönderilemedi. Mail adresini kontrol edin.");
     }
   }
 }

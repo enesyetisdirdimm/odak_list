@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:odak_list/services/database_service.dart';
-import 'package:odak_list/screens/login_screen.dart'; // YENİ: Login ekranı import edildi
+import 'package:odak_list/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -41,7 +41,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (!mounted) return;
     
-    // YENİ: Artık direkt Login ekranına gidiyor
+    // Direkt Login ekranına yönlendir
     Navigator.pushReplacement(
       context, 
       MaterialPageRoute(builder: (context) => const LoginScreen())
@@ -66,22 +66,32 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Görsel Alanı
+                        // --- GÖRSEL ALANI ---
                         Container(
                           height: 200, width: 200,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.1),
+                          decoration: const BoxDecoration(
+                            // İstenilen arka plan rengi (#2c333b)
+                            color: Color(0xFF2C333B),
                             shape: BoxShape.circle,
                           ),
                           child: index == 0 
-                            ? Image.asset("assets/icon.png", scale: 4)
+                            ? Padding(
+                                // Resim kenarlara yapışmasın diye boşluk
+                                padding: const EdgeInsets.all(30.0),
+                                child: Image.asset(
+                                  "assets/icon.png", 
+                                  fit: BoxFit.contain
+                                ),
+                              )
                             : Icon(
                                 index == 1 ? Icons.timer : Icons.widgets, 
-                                size: 100, 
-                                color: const Color(0xFF00E5FF)
+                                size: 80, // İkon boyutu daha dengeli
+                                color: const Color(0xFF00E5FF) // Cam Göbeği Mavi
                               ),
                         ),
+                        
                         const SizedBox(height: 40),
+                        
                         Text(
                           _pages[index]["title"]!,
                           style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),

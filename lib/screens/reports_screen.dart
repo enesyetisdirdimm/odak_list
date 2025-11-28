@@ -19,7 +19,8 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> {
-  int _touchedIndex = -1; // Pasta grafik animasyonu için
+  int _touchedIndex = -1; // Pasta grafik animasyonu için (Genel Durum)
+  int _workloadTouchedIndex = -1; // İş Yükü Grafiği animasyonu için
 
   @override
   Widget build(BuildContext context) {
@@ -80,7 +81,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
               const SizedBox(height: 30),
 
-              // 2. HAFTALIK VERİMLİLİK (Bar Chart)
+              // 2. HAFTALIK VERİMLİLİK (Line Chart)
               Text("Son 7 Günlük Aktivite", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
               const SizedBox(height: 15),
               Container(
@@ -96,15 +97,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
               
               const SizedBox(height: 30),
 
-              // 3. EKİP LİDERLİK TABLOSU (Sadece Admin veya Herkes görebilir, şu an herkes)
+              // 3. YENİ: İŞ YÜKÜ DAĞILIMI (Kimin üstünde ne kadar iş var?)
+              Text("İş Yükü Dağılımı (Bekleyen)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+              const SizedBox(height: 5),
+              Text("Şu an kimin masasında ne kadar dosya var?", style: TextStyle(fontSize: 12, color: subTextColor)),
+              const SizedBox(height: 15),
+              Container(
+                height: 320,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: isDarkMode ? [] : AppStyles.softShadow,
+                ),
+                child: _buildWorkloadChart(allTasks, taskProvider, isDarkMode, textColor),
+              ),
+
+              const SizedBox(height: 30),
+
+              // 4. EKİP LİDERLİK TABLOSU (Sadece Admin veya Herkes görebilir, şu an herkes)
               Text("Ekip Şampiyonları 🏆", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
               const SizedBox(height: 15),
               _buildTeamLeaderboard(allTasks, taskProvider, isDarkMode, cardColor, textColor),
 
               const SizedBox(height: 30),
 
-              // 4. İŞ DAĞILIMI (Pie Chart)
-              Text("Durum Dağılımı", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+              // 5. GENEL DURUM DAĞILIMI (Pie Chart)
+              Text("Genel Durum", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
               const SizedBox(height: 15),
               Container(
                 height: 300,
@@ -155,7 +174,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
- Widget _buildWeeklyChart(List<Task> tasks, ThemeProvider theme, bool isDark) {
+  Widget _buildWeeklyChart(List<Task> tasks, ThemeProvider theme, bool isDark) {
     // 1. Verileri Hazırla
     List<FlSpot> spots = [];
     DateTime now = DateTime.now();
@@ -267,6 +286,119 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  // --- YENİ WIDGET: İŞ YÜKÜ DAĞILIMI ---
+  Widget _buildWorkloadChart(List<Task> tasks, TaskProvider provider, bool isDark, Color textColor) {
+    // 1. Bekleyen İşleri Kişilere Göre Say
+    Map<String, int> workloadMap = {};
+    
+    // "Atanmamış" işleri de "Havuz" olarak görelim
+    workloadMap["unassigned"] = 0;
+
+    // Tüm üyeleri map'e ekle (0 ile başlat)
+    for (var member in provider.teamMembers) {
+      workloadMap[member.id] = 0;
+    }
+
+    // Görevleri tara
+    for (var task in tasks) {
+      if (!task.isDone) {
+        if (task.assignedMemberId == null) {
+          workloadMap["unassigned"] = (workloadMap["unassigned"] ?? 0) + 1;
+        } else if (workloadMap.containsKey(task.assignedMemberId)) {
+          workloadMap[task.assignedMemberId!] = (workloadMap[task.assignedMemberId!] ?? 0) + 1;
+        }
+      }
+    }
+
+    // Sadece işi olanları (value > 0) listele ki grafik karışmasın
+    var activeLoad = workloadMap.entries.where((e) => e.value > 0).toList();
+
+    if (activeLoad.isEmpty) {
+      return const Center(child: Text("Şu an bekleyen iş yok! Herkes rahat. 🎉", style: TextStyle(color: Colors.grey)));
+    }
+
+    // Renk Paleti
+    List<Color> colors = [
+      Colors.blue, Colors.red, Colors.orange, Colors.purple, Colors.teal, Colors.pink, Colors.green
+    ];
+
+    return Row(
+      children: [
+        // GRAFİK KISMI
+        Expanded(
+          flex: 3,
+          child: PieChart(
+            PieChartData(
+              pieTouchData: PieTouchData(
+                touchCallback: (FlTouchEvent event, pieTouchResponse) {
+                  setState(() {
+                    if (!event.isInterestedForInteractions || pieTouchResponse == null || pieTouchResponse.touchedSection == null) {
+                      _workloadTouchedIndex = -1;
+                      return;
+                    }
+                    _workloadTouchedIndex = pieTouchResponse.touchedSection!.touchedSectionIndex;
+                  });
+                },
+              ),
+              borderData: FlBorderData(show: false),
+              sectionsSpace: 2,
+              centerSpaceRadius: 40,
+              sections: activeLoad.asMap().entries.map((entry) {
+                int index = entry.key;
+                String memberId = entry.value.key;
+                int count = entry.value.value;
+                
+                final isTouched = index == _workloadTouchedIndex;
+                final double radius = isTouched ? 60.0 : 50.0;
+                final double fontSize = isTouched ? 18.0 : 14.0;
+                
+                // Havuz için gri, diğerleri için renkli
+                Color color = memberId == "unassigned" ? Colors.grey : colors[index % colors.length];
+
+                return PieChartSectionData(
+                  color: color,
+                  value: count.toDouble(),
+                  title: '$count',
+                  radius: radius,
+                  titleStyle: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold, color: Colors.white),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+        const SizedBox(width: 20),
+        
+        // AÇIKLAMA KISMI (LEGEND)
+        Expanded(
+          flex: 2,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: activeLoad.asMap().entries.map((entry) {
+              int index = entry.key;
+              String memberId = entry.value.key;
+              
+              // İsmi bul
+              String name = memberId == "unassigned" ? "Havuz (Atanmadı)" : (provider.getMemberName(memberId) ?? "Bilinmeyen");
+              Color color = memberId == "unassigned" ? Colors.grey : colors[index % colors.length];
+              
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Row(
+                  children: [
+                    Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(name, style: TextStyle(fontSize: 12, color: textColor, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        )
+      ],
     );
   }
 

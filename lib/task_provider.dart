@@ -35,6 +35,9 @@ class TaskProvider extends ChangeNotifier {
   
   bool _isSoundEnabled = true;
   bool _isVibrationEnabled = true;
+  
+  // Premium Durumu
+  bool _isPremium = false; 
 
   // CANLI TAKİP İÇİN ABONELİKLER
   StreamSubscription? _authSubscription;
@@ -53,6 +56,7 @@ class TaskProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isSoundEnabled => _isSoundEnabled;
   bool get isVibrationEnabled => _isVibrationEnabled;
+  bool get isPremium => _isPremium; 
 
   // YETKİ KONTROLÜ
   bool get isAdmin => _currentMember?.role == 'admin';
@@ -68,38 +72,42 @@ class TaskProvider extends ChangeNotifier {
   Future<void> selectMember(TeamMember member) async {
     _currentMember = member;
     
-    // --- 1. FCM TOKEN İŞLEMLERİ (YENİ) ---
+    // 1. Premium Durumunu Kontrol Et ve Kaydet
+    _isPremium = await _dbService.checkPremiumStatus();
+
+    // 2. FCM TOKEN İŞLEMLERİ
     try {
       FirebaseMessaging messaging = FirebaseMessaging.instance;
-      
-      // İzin İste (iOS için zorunlu)
       NotificationSettings settings = await messaging.requestPermission(
         alert: true, badge: true, sound: true,
       );
 
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        // Token'ı al
         String? token = await messaging.getToken();
         if (token != null) {
-          // Veritabanına kaydet
           await _dbService.updateMemberToken(member.id, token);
-          print("FCM Token Kaydedildi: $token");
         }
       }
     } catch (e) {
       print("Token hatası: $e");
     }
-    // --------------------------------------
 
+    // 3. Profili hafızaya kaydet (Oto Giriş İçin)
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('saved_member_id', member.id);
     
+    // 4. Otomatik Veri Kurtarma (Eski verileri sahiplen)
+    _dbService.claimOldData().then((count) {
+      if (count > 0) print("Otomatik Kurtarma: $count veri eklendi.");
+    });
+
     _refreshNotifications();
     notifyListeners(); 
   }
 
   Future<void> logoutMember() async {
     _currentMember = null;
+    _isPremium = false;
     
     // Hafızadan sil
     final prefs = await SharedPreferences.getInstance();
@@ -138,6 +146,9 @@ class TaskProvider extends ChangeNotifier {
     _tasksSubscription?.cancel();
     _membersSubscription?.cancel();
 
+    // Otomatik Veri Kurtarma
+    _dbService.claimOldData();
+
     // 1. Ekip Üyelerini Dinle ve OTO GİRİŞ YAP
     _membersSubscription = _dbService.getTeamMembersStream().listen((membersData) async {
       _teamMembers = membersData;
@@ -152,16 +163,18 @@ class TaskProvider extends ChangeNotifier {
             // Kayıtlı kişiyi bul ve seç
             _currentMember = membersData.firstWhere((m) => m.id == savedId);
             
+            // Oto girişte de Premium kontrolü yap
+            _isPremium = await _dbService.checkPremiumStatus();
+            
             // Profil yüklendiği için bildirimleri de tazele
             _refreshNotifications();
           } catch (e) {
-            // Kişi silinmiş olabilir, hafızayı temizle
             await prefs.remove('saved_member_id');
           }
         }
       }
       
-      // Profil kontrolü bitti, ekranı açabiliriz (Diğer veriler arkadan gelse de olur)
+      // Profil kontrolü bitti, ekranı açabiliriz
       _isLoading = false;
       notifyListeners();
     });
@@ -200,6 +213,7 @@ class TaskProvider extends ChangeNotifier {
     _tasks = [];
     _teamMembers = [];
     _currentMember = null;
+    _isPremium = false;
     
     _projectsSubscription?.cancel();
     _tasksSubscription?.cancel();
@@ -250,8 +264,6 @@ class TaskProvider extends ChangeNotifier {
     if (task.id == null || task.lastCommentAt == null) return false;
     
     DateTime? lastViewed = _taskLastViewed[task.id!];
-    
-    // Eğer hiç görmediyse (null) ve yorum varsa -> UNREAD
     if (lastViewed == null) return true; 
     
     return task.lastCommentAt!.isAfter(lastViewed);
@@ -305,16 +317,14 @@ class TaskProvider extends ChangeNotifier {
   // --- GÖREV İŞLEMLERİ (CRUD) ---
   
   Future<void> addTask(Task task) async {
-    // DÜZELTME: creatorId artık Profil ID'si değil, ANA HESAP ID'si (Auth UID) olacak.
-    // Böylece Cloud Function "users/{uid}" yolunu doğru bulabilecek.
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      task.creatorId = user.uid;
+    // creatorId: Profil ID
+    if (_currentMember != null) {
+      task.creatorId = _currentMember!.id;
     }
+    // ownerId: Auth ID (DatabaseService otomatik ekliyor)
     
     Task createdTask = await _dbService.createTask(task);
     
-    // Loglama kısmında ismini kullanmaya devam edebiliriz (Bu sadece yazı)
     if (_currentMember != null) {
       await _dbService.addActivityLog(
         createdTask.id!, 

@@ -3,6 +3,7 @@ import 'package:odak_list/models/team_member.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/task_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:odak_list/screens/premium_screen.dart';
 
 class TeamScreen extends StatelessWidget {
   const TeamScreen({super.key});
@@ -78,7 +79,36 @@ class TeamScreen extends StatelessWidget {
       appBar: AppBar(title: const Text("Ekip ve Roller")),
       // YENİ: Admin buradan da kişi ekleyebilmeli
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _addMemberFromSettings(context),
+        onPressed: () async {
+          // 1. Mevcut Üye Sayısını Kontrol Et (Async işlem gerektiği için biraz farklı)
+          // Stream'den son veriyi alamayız, veritabanına soralım.
+          
+          final dbService = DatabaseService();
+          // Not: Bu listeyi StreamBuilder zaten çekiyor ama butonun içinde o veriye erişmek için
+          // en temiz yol ya Provider kullanmak ya da anlık DB sorgusu atmaktır.
+          // Burada basitlik adına DB sorgusu atıyoruz.
+          
+          bool isPremium = await dbService.checkPremiumStatus();
+          
+          // Mevcut üyeleri çek
+          // (Not: Bu fonksiyonu DatabaseService'e eklemediysek aşağıda vereceğim)
+          var membersSnapshot = await DatabaseService().getTeamMembersCollection().get();
+          int memberCount = membersSnapshot.docs.length;
+
+          // KISITLAMA MANTIĞI:
+          // Premium değilse VE Üye sayısı 3 veya fazlaysa -> DURDUR
+          if (!isPremium && memberCount >= 3) {
+             if (context.mounted) {
+               Navigator.push(context, MaterialPageRoute(builder: (context) => const PremiumScreen()));
+             }
+             return;
+          }
+
+          // Sorun yoksa ekleme diyaloğunu aç
+          if (context.mounted) {
+            _addMemberFromSettings(context);
+          }
+        },
         child: const Icon(Icons.person_add),
       ),
       body: StreamBuilder<List<TeamMember>>(

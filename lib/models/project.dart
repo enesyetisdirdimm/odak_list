@@ -1,9 +1,12 @@
+// lib/models/project.dart
+
 class Project {
-  String? id; // ARTIK STRING
+  String? id;
   String title;
   int colorValue;
+  String? ownerId; // YENİ: Projenin sahibi kim? (Auth UID)
 
-  // Bu alanlar veritabanında tutulmaz, hesaplanır
+  // Hesaplanan alanlar
   int taskCount;
   int completedTaskCount;
 
@@ -11,6 +14,7 @@ class Project {
     this.id,
     required this.title,
     required this.colorValue,
+    this.ownerId, // Constructor'a eklendi
     this.taskCount = 0,
     this.completedTaskCount = 0,
   });
@@ -24,15 +28,16 @@ class Project {
     return {
       'title': title,
       'colorValue': colorValue,
+      'ownerId': ownerId, // Map'e eklendi
     };
   }
 
-  // Firestore'dan gelen veriyi (Map + ID) modele çevirir
   factory Project.fromMap(Map<String, dynamic> map, String documentId) {
     return Project(
       id: documentId,
       title: map['title'] ?? '',
       colorValue: map['colorValue'] ?? 0xFF42A5F5,
+      ownerId: map['ownerId'], // Map'ten oku
     );
   }
 }

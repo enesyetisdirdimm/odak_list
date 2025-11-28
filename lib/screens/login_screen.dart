@@ -1,4 +1,8 @@
+// lib/screens/login_screen.dart
+
 import 'package:flutter/material.dart';
+import 'package:odak_list/screens/profile_select_screen.dart'; 
+import 'package:odak_list/screens/verify_email_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
@@ -17,11 +21,55 @@ class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  // YENİ: PIN Kontrolcüsü
   final _pinController = TextEditingController();
   
   final AuthService _authService = AuthService();
   final DatabaseService _dbService = DatabaseService();
+
+  // --- ŞİFRE SIFIRLAMA DİYALOĞU (YENİ) ---
+  void _showForgotPasswordDialog() {
+    final resetEmailController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Şifre Sıfırlama"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Mail adresinizi girin, size sıfırlama bağlantısı gönderelim."),
+            const SizedBox(height: 10),
+            TextField(
+              controller: resetEmailController,
+              decoration: const InputDecoration(labelText: "Email", border: OutlineInputBorder()),
+              keyboardType: TextInputType.emailAddress,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
+          ElevatedButton(
+            onPressed: () async {
+              if (resetEmailController.text.trim().isEmpty) return;
+              try {
+                await _authService.sendPasswordResetEmail(resetEmailController.text.trim());
+                if (mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Sıfırlama maili gönderildi! Lütfen kutunuzu kontrol edin."))
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                }
+              }
+            },
+            child: const Text("Gönder"),
+          )
+        ],
+      ),
+    );
+  }
 
   void _submit() async {
     final name = _nameController.text.trim();
@@ -29,7 +77,6 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
     final pin = _pinController.text.trim();
 
-    // Temel Kontroller
     if (email.isEmpty || password.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Lütfen geçerli bir email ve en az 6 haneli şifre girin."))
@@ -37,19 +84,13 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     
-    // KAYIT ÖZEL KONTROLLERİ
     if (!isLogin) {
       if (name.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Lütfen adınızı girin."))
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen adınızı girin.")));
         return;
       }
-      // YENİ: PIN Zorunluluğu
       if (pin.length != 4) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Admin profili için 4 haneli bir PIN girin."))
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Admin profili için 4 haneli bir PIN girin.")));
         return;
       }
     }
@@ -58,18 +99,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       if (isLogin) {
-        // --- GİRİŞ YAP ---
         await _authService.signIn(email, password);
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const ProfileSelectScreen()),
+          );
+        }
       } else {
-        // --- KAYIT OL ---
-        // 1. Hesabı oluştur
         await _authService.signUp(email, password, name);
-        
-        // 2. Veritabanına ŞİFRELİ Admin profilini ekle
         await _dbService.createInitialAdminProfile(name, pin);
+        
+        if (mounted) {
+           await _authService.sendEmailVerification();
+           Navigator.pushReplacement(
+             context,
+             MaterialPageRoute(builder: (context) => const VerifyEmailScreen()), 
+           );
+        }
       }
-      
-      // Başarılı olursa main.dart bizi içeri alacak
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -91,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.check_circle, size: 100, color: AppColors.priorityMedium),
+              const Icon(Icons.check_circle, size: 100, color: AppColors.priorityMedium),
               const SizedBox(height: 20),
               Text(
                 isLogin ? "Tekrar Hoşgeldin!" : "Hesap Oluştur",
@@ -99,7 +147,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 40),
 
-              // --- KAYIT FORMU ---
               if (!isLogin) ...[
                 TextField(
                   controller: _nameController,
@@ -110,8 +157,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                
-                // YENİ: ZORUNLU PIN ALANI
                 TextField(
                   controller: _pinController,
                   decoration: InputDecoration(
@@ -127,7 +172,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 16),
               ],
 
-              // Email
               TextField(
                 controller: _emailController,
                 decoration: InputDecoration(
@@ -139,7 +183,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Şifre
               TextField(
                 controller: _passwordController,
                 obscureText: true,
@@ -149,9 +192,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   prefixIcon: const Icon(Icons.lock_outline),
                 ),
               ),
-              const SizedBox(height: 24),
+              
+              // --- ŞİFREMİ UNUTTUM BUTONU (Sadece Giriş Ekranında) ---
+              if (isLogin)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _showForgotPasswordDialog,
+                    child: const Text("Şifremi Unuttum?", style: TextStyle(color: Colors.grey)),
+                  ),
+                )
+              else
+                const SizedBox(height: 24),
 
-              // Buton
               isLoading 
                 ? const CircularProgressIndicator()
                 : SizedBox(

@@ -1,12 +1,15 @@
+// Dosya: lib/screens/settings_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:odak_list/screens/premium_screen.dart';
+import 'package:odak_list/screens/premium_screen.dart'; // Premium Ekranı
 import 'package:odak_list/screens/team_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
 import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/screens/profile_select_screen.dart';
+import 'package:odak_list/screens/login_screen.dart'; 
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -118,8 +121,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // --- HESAPTAN TAMAMEN ÇIKIŞ ---
   void _signOut() async {
+    // 1. Firebase'den çıkış yap
     await _authService.signOut();
-    if (mounted) Navigator.pop(context);
+    
+    // 2. Provider'daki profili temizle
+    if (mounted) {
+      Provider.of<TaskProvider>(context, listen: false).logoutMember();
+    }
+
+    // 3. Login Ekranına Yönlendir (Geçmişi Silerek)
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false, // Tüm geçmiş rotaları sil
+      );
+    }
   }
 
   final List<Map<String, dynamic>> colorPalettes = const [
@@ -134,13 +151,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    final taskProvider = Provider.of<TaskProvider>(context); // Yetki kontrolü için
+    final taskProvider = Provider.of<TaskProvider>(context);
 
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
     final textColor = isDarkMode ? Colors.white : Colors.black;
     
     final currentMember = taskProvider.currentMember;
-    final isAdmin = taskProvider.isAdmin; // Admin mi?
+    final isAdmin = taskProvider.isAdmin; 
 
     final userName = currentMember?.name ?? "Misafir";
     final userRole = isAdmin ? "Yönetici" : "Editör";
@@ -186,7 +203,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Row(
                             children: [
                               Flexible(child: Text(userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))),
-                              // İsim Düzenleme Butonu (İsteğe bağlı: Herkes ismini düzeltebilir mi? Şimdilik evet)
                               IconButton(
                                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
                                 onPressed: _showEditNameDialog, 

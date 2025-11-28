@@ -1,8 +1,9 @@
 // lib/screens/task_detail_screen.dart
 
+import 'dart:io'; // Dosya işlemleri için
 import 'package:flutter/material.dart';
 import 'package:odak_list/models/activity_log.dart';
-import 'package:odak_list/models/comment.dart'; // Yorum modeli
+import 'package:odak_list/models/comment.dart';
 import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/sub_task.dart';
 import 'package:odak_list/models/task.dart';
@@ -12,6 +13,9 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:odak_list/task_provider.dart';
+import 'package:file_picker/file_picker.dart'; // Dosya Seçimi
+import 'package:cached_network_image/cached_network_image.dart'; // Resim Gösterimi
+import 'package:odak_list/screens/premium_screen.dart'; // Premium Yönlendirmesi
 
 class TaskDetailScreen extends StatefulWidget {
   final Task task;
@@ -28,10 +32,11 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
   late TextEditingController _notesController;
   late TextEditingController _subTaskController;
   late TextEditingController _tagController;
-  late TextEditingController _commentController; // Yorum yazma alanı
+  late TextEditingController _commentController;
   late TabController _tabController;
   
   late Task _tempTask;
+  
   final Map<int, String> _priorities = {2: 'Yüksek', 1: 'Normal', 0: 'Düşük'};
   
   final Map<String, String> _recurrenceOptions = {
@@ -42,13 +47,15 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
   };
   
   List<Project> _projects = []; 
+  bool _isUploading = false; // Dosya yükleniyor animasyonu için
 
   @override
   void initState() {
     super.initState();
-    // 3 SEKME: Detaylar, Yorumlar, Geçmiş
+    // 3 Sekmeli Yapı: Detaylar, Yorumlar, Geçmiş
     _tabController = TabController(length: 3, vsync: this); 
 
+    // Görevi geçici değişkene kopyala (Düzenleme için)
     _tempTask = Task(
       id: widget.task.id,
       title: widget.task.title,
@@ -63,6 +70,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
       subTasks: List.from(widget.task.subTasks),
       recurrence: widget.task.recurrence,
       tags: List.from(widget.task.tags),
+      lastCommentAt: widget.task.lastCommentAt,
     );
 
     _titleController = TextEditingController(text: _tempTask.title);
@@ -73,7 +81,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
 
     _loadProjects();
 
-    // Detay ekranına girildiğinde "Okundu" olarak işaretle
+    // Detay ekranına girildiğinde "Okundu" olarak işaretle (Kırmızı noktayı siler)
     if (widget.task.id != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Provider.of<TaskProvider>(context, listen: false).markTaskAsRead(widget.task.id!);
@@ -85,6 +93,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
     final taskProvider = Provider.of<TaskProvider>(context, listen: false);
     setState(() {
       _projects = taskProvider.projects;
+      // Eğer proje silinmişse veya atama yoksa varsayılanı seç
       if ((_tempTask.projectId == null || !_projects.any((p) => p.id == _tempTask.projectId)) && _projects.isNotEmpty) {
         _tempTask.projectId = _projects.first.id;
       }
@@ -176,7 +185,87 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
     Navigator.pop(context);
   }
 
-  // Yorum Gönderme Fonksiyonu
+  // --- DOSYA YÜKLEME MANTIĞI ---
+  void _pickAndUploadFile() async {
+    if (_tempTask.id == null) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Önce görevi kaydetmelisiniz.")));
+       return;
+    }
+
+    // PREMIUM KONTROLÜ
+    final provider = Provider.of<TaskProvider>(context, listen: false);
+    if (!provider.isPremium) {
+      Navigator.push(context, MaterialPageRoute(builder: (context) => const PremiumScreen()));
+      return;
+    }
+
+    // 1. Dosya Seçiciyi Başlat
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.any, 
+    );
+
+    if (result != null && result.files.single.path != null) {
+      File file = File(result.files.single.path!);
+      
+      // 2. Boyut Kontrolü (Max 5 MB)
+      int sizeInBytes = await file.length();
+      double sizeInMB = sizeInBytes / (1024 * 1024);
+
+      if (sizeInMB > 5) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Dosya çok büyük! Maksimum 5MB yükleyebilirsiniz."),
+            backgroundColor: Colors.red,
+          )
+        );
+        return;
+      }
+
+      setState(() => _isUploading = true);
+      
+      String fileName = result.files.single.name;
+      
+      // 3. Firebase Storage'a Yükle
+      String? downloadUrl = await widget.dbService.uploadFile(file.path, fileName);
+      
+      if (downloadUrl != null) {
+        // 4. Yorum Olarak Kaydet
+        final member = provider.currentMember;
+        
+        final newComment = Comment(
+          id: '',
+          text: "📎 Bir dosya gönderdi", 
+          authorName: member?.name ?? "Bilinmeyen",
+          authorId: member?.id ?? "",
+          timestamp: DateTime.now(),
+          attachmentUrl: downloadUrl, 
+          fileName: fileName,
+          fileType: _getFileType(fileName),
+        );
+
+        await widget.dbService.addComment(_tempTask.id!, newComment);
+        if (mounted) {
+           provider.markTaskAsRead(_tempTask.id!);
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Dosya yüklenemedi. Storage ayarlarını kontrol edin.")));
+      }
+      
+      setState(() => _isUploading = false);
+    }
+  }
+
+  // Dosya uzantısına göre tip belirleme
+  String _getFileType(String name) {
+    name = name.toLowerCase();
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') || name.endsWith('.gif')) {
+      return 'image';
+    }
+    return 'file';
+  }
+
+  // --- YORUM GÖNDERME ---
   void _sendComment() async {
     if (_commentController.text.trim().isEmpty) return;
     if (_tempTask.id == null) {
@@ -189,7 +278,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
     if (member == null) return;
 
     final newComment = Comment(
-      id: '', // Firestore ID oluşturacak
+      id: '', 
       text: _commentController.text.trim(),
       authorName: member.name,
       authorId: member.id,
@@ -198,13 +287,12 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
 
     await widget.dbService.addComment(_tempTask.id!, newComment);
     
-    // Yorum gönderince hemen "Okundu" olarak işaretle (Kendi yorumumuzu görmüş oluyoruz)
     if (mounted) {
        provider.markTaskAsRead(_tempTask.id!);
     }
 
     _commentController.clear();
-    // FocusScope.of(context).unfocus(); // Klavyeyi kapatmak istersen bunu aç
+    // FocusScope.of(context).unfocus(); // Klavyeyi kapatmak istersen açabilirsin
   }
 
   @override
@@ -225,6 +313,9 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
 
     // Düzenleyebilir mi? (Admin VEYA Yeni Görev VEYA Oluşturan Kişi)
     final bool canEdit = isAdmin || isNewTask || isCreator;
+    
+    // Premium Durumu
+    final bool isPremium = taskProvider.isPremium;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -249,11 +340,13 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
           ],
         ),
         actions: [
+          // Sadece Admin Silebilir
           if (_tempTask.id != null && isAdmin)
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.red),
               onPressed: _deleteTask,
             ),
+          // Kaydet Butonu
           TextButton(
             onPressed: _saveTask,
             child: Text("KAYDET", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: themeProvider.secondaryColor)),
@@ -264,7 +357,9 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
         child: TabBarView(
           controller: _tabController,
           children: [
-            // --- 1. SEKME: DETAYLAR FORMU ---
+            // ============================================================
+            // 1. SEKME: DETAYLAR FORMU
+            // ============================================================
             SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
               child: Column(
@@ -321,7 +416,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                   ),
                   Divider(color: Colors.grey.withOpacity(0.3)),
 
-                  // PROJE VE ÖNCELİK
+                  // PROJE VE ÖNCELİK (Yan Yana)
                   Row(
                     children: [
                       Expanded(
@@ -358,7 +453,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                   ),
                   Divider(color: Colors.grey.withOpacity(0.3)),
 
-                  // GÖREV SORUMLUSU (ATAMA)
+                  // GÖREV SORUMLUSU (ATAMA) - Sade Tasarım
                   DropdownButtonFormField<String?>(
                     decoration: const InputDecoration(
                       labelText: "Görev Sorumlusu",
@@ -371,14 +466,14 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                     isExpanded: true,
                     hint: const Text("Kime atansın?"),
                     
-                    // Yetki Kontrolü
+                    // Yetki Kontrolü (Sadece Admin, Creator veya Yeni Görev)
                     onChanged: canEdit ? (String? newValue) {
                       setState(() {
                         _tempTask.assignedMemberId = newValue;
                       });
                     } : null,
                     
-                    // Admin değilse ok işaretini gizle
+                    // Düzenleyemiyorsa oku gizle
                     icon: canEdit ? null : const SizedBox.shrink(),
                     
                     items: [
@@ -391,7 +486,6 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                           value: member.id,
                           child: Row(
                             children: [
-                              // Küçük Avatar
                               CircleAvatar(
                                 radius: 10,
                                 backgroundColor: member.role == 'admin' ? Colors.blue : Colors.orange,
@@ -408,7 +502,6 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                       }).toList(),
                     ],
                   ),
-                    
                   
                   const SizedBox(height: 20),
                   Divider(color: Colors.grey.withOpacity(0.3)),
@@ -527,11 +620,14 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
               ),
             ),
 
-            // --- 2. YORUMLAR (GÜNCELLENDİ: AVATAR VE İSİM GÖRÜNÜMÜ) ---
+            // ============================================================
+            // 2. SEKME: YORUMLAR (CHAT TASARIMI + DOSYA)
+            // ============================================================
             _tempTask.id == null
                 ? const Center(child: Text("Yorum yapmak için önce görevi kaydedin.", style: TextStyle(color: Colors.grey)))
                 : Column(
                     children: [
+                      // MESAJ LİSTESİ (Expanded)
                       Expanded(
                         child: StreamBuilder<List<Comment>>(
                           stream: widget.dbService.getTaskComments(_tempTask.id!),
@@ -548,8 +644,8 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                                 final comment = comments[index];
                                 final isMe = comment.authorId == taskProvider.currentMember?.id;
                                 final timeStr = DateFormat('HH:mm').format(comment.timestamp);
-                                
                                 final nameInitial = comment.authorName.isNotEmpty ? comment.authorName[0].toUpperCase() : "?";
+                                final bool hasAttachment = comment.attachmentUrl != null;
 
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 12.0),
@@ -583,7 +679,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                                           child: Column(
                                             crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                             children: [
-                                              // İSİM BAŞLIĞI (Herkes için görünür)
+                                              // İsim
                                               Text(
                                                 isMe ? "Ben" : comment.authorName,
                                                 style: TextStyle(
@@ -594,11 +690,62 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                                               ),
                                               const SizedBox(height: 4),
                                               
-                                              // MESAJ
+                                              // --- DOSYA GÖSTERİMİ ---
+                                              if (hasAttachment) ...[
+                                                if (comment.fileType == 'image')
+                                                  GestureDetector(
+                                                    onTap: () {
+                                                      // Resmi Tam Ekran Göster
+                                                      showDialog(
+                                                        context: context, 
+                                                        builder: (_) => Dialog(
+                                                          child: CachedNetworkImage(
+                                                            imageUrl: comment.attachmentUrl!,
+                                                            placeholder: (context, url) => const Center(child: CircularProgressIndicator()),
+                                                            errorWidget: (context, url, error) => const Icon(Icons.error),
+                                                          )
+                                                        )
+                                                      );
+                                                    },
+                                                    child: ClipRRect(
+                                                      borderRadius: BorderRadius.circular(8),
+                                                      child: CachedNetworkImage(
+                                                        imageUrl: comment.attachmentUrl!,
+                                                        height: 150, width: 200, fit: BoxFit.cover,
+                                                        placeholder: (context, url) => Container(height: 150, width: 200, color: Colors.grey.withOpacity(0.3), child: const Center(child: CircularProgressIndicator())),
+                                                        errorWidget: (context, url, error) => const Icon(Icons.error),
+                                                      ),
+                                                    ),
+                                                  )
+                                                else 
+                                                  // Dosya ise İkon + İsim
+                                                  Container(
+                                                    padding: const EdgeInsets.all(8),
+                                                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.5), borderRadius: BorderRadius.circular(8)),
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        const Icon(Icons.attach_file, size: 20),
+                                                        const SizedBox(width: 5),
+                                                        Flexible(
+                                                          child: Text(
+                                                            comment.fileName ?? "Dosya", 
+                                                            style: const TextStyle(decoration: TextDecoration.underline),
+                                                            overflow: TextOverflow.ellipsis,
+                                                          )
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                const SizedBox(height: 8),
+                                              ],
+                                              // -----------------------
+
+                                              // Metin
                                               Text(comment.text, style: TextStyle(color: textColor)),
                                               const SizedBox(height: 4),
                                               
-                                              // SAAT
+                                              // Saat
                                               Text(timeStr, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
                                             ],
                                           ),
@@ -622,24 +769,59 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                           },
                         ),
                       ),
-                      // Yorum Yazma Alanı
+                      
+                      // MESAJ YAZMA KUTUSU (Sticky Bottom)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, -2))]),
+                        padding: const EdgeInsets.fromLTRB(10, 12, 16, 24),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).cardColor, 
+                          border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.1))),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, -3))]
+                        ),
                         child: Row(
                           children: [
+                            // ATAŞ (Dosya Ekleme) BUTONU
+                            Stack(
+                              children: [
+                                IconButton(
+                                  onPressed: _isUploading ? null : _pickAndUploadFile,
+                                  icon: _isUploading 
+                                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
+                                    : Icon(Icons.attach_file, color: themeProvider.secondaryColor),
+                                ),
+                                // Premium Kilit İkonu
+                                if (!isPremium)
+                                  const Positioned(
+                                    right: 8, top: 8,
+                                    child: Icon(Icons.lock, size: 12, color: Colors.orange),
+                                  )
+                              ],
+                            ),
+
                             Expanded(
                               child: TextField(
                                 controller: _commentController,
-                                maxLength: 500,
+                                maxLength: 500, // Firestore kuralına uyum
                                 style: TextStyle(color: textColor),
-                                decoration: InputDecoration(hintText: "Bir yorum yaz...", hintStyle: TextStyle(color: Colors.grey), border: OutlineInputBorder(borderRadius: BorderRadius.circular(25), borderSide: BorderSide.none), filled: true, fillColor: isDarkMode ? Colors.grey.shade900 : Colors.grey.shade100, contentPadding: const EdgeInsets.symmetric(horizontal: 20)),
+                                decoration: InputDecoration(
+                                  counterText: "", // Karakter sayısını gizle
+                                  hintText: "Bir mesaj yaz...", 
+                                  hintStyle: TextStyle(color: Colors.grey), 
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(25), borderSide: BorderSide.none), 
+                                  filled: true, 
+                                  fillColor: isDarkMode ? Colors.grey.shade900 : Colors.grey.shade100, 
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            CircleAvatar(
-                              backgroundColor: themeProvider.secondaryColor,
-                              child: IconButton(icon: const Icon(Icons.send, color: Colors.white, size: 20), onPressed: _sendComment),
+                            GestureDetector(
+                              onTap: _sendComment,
+                              child: CircleAvatar(
+                                radius: 24,
+                                backgroundColor: themeProvider.secondaryColor,
+                                child: const Icon(Icons.send, color: Colors.white, size: 20),
+                              ),
                             )
                           ],
                         ),
@@ -647,7 +829,9 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                     ],
                   ),
 
-            // --- 3. SEKME: GEÇMİŞ (AKTİVİTE LOGLARI) ---
+            // ============================================================
+            // 3. SEKME: GEÇMİŞ (AKTİVİTE LOGLARI - PREMIUM SINIRLI)
+            // ============================================================
             _tempTask.id == null
                 ? const Center(child: Text("Görev oluşturulduktan sonra geçmiş tutulur.", style: TextStyle(color: Colors.grey)))
                 : StreamBuilder<List<ActivityLog>>(
@@ -657,56 +841,84 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                       final logs = snapshot.data ?? [];
                       if (logs.isEmpty) return const Center(child: Text("Henüz işlem geçmişi yok.", style: TextStyle(color: Colors.grey)));
 
-                      return ListView.builder(
+                      // PREMIUM KONTROLÜ (Sadece ilk 3 tanesini göster)
+                      final displayLogs = isPremium ? logs : logs.take(3).toList();
+                      final hasMore = !isPremium && logs.length > 3;
+
+                      return ListView(
                         padding: const EdgeInsets.all(20),
-                        itemCount: logs.length,
-                        itemBuilder: (context, index) {
-                          final log = logs[index];
-                          final timeStr = DateFormat('dd MMM, HH:mm').format(log.timestamp);
-                          
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 16.0),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Zaman Çizgisi Noktası
-                                Column(
-                                  children: [
-                                    Container(
-                                      width: 12, height: 12, 
-                                      decoration: BoxDecoration(color: themeProvider.secondaryColor.withOpacity(0.5), shape: BoxShape.circle)
-                                    ),
-                                    if (index != logs.length - 1)
-                                      Container(width: 2, height: 40, color: Colors.grey.withOpacity(0.2)),
-                                  ],
-                                ),
-                                const SizedBox(width: 16),
-                                
-                                // İçerik
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ...displayLogs.map((log) {
+                            final timeStr = DateFormat('dd MMM, HH:mm').format(log.timestamp);
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 16.0),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Zaman Çizgisi Noktası
+                                  Column(
                                     children: [
-                                      Text(log.action, style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Icon(Icons.person, size: 12, color: Colors.grey),
-                                          const SizedBox(width: 4),
-                                          Text(log.userName, style: TextStyle(fontSize: 12, color: subTextColor, fontWeight: FontWeight.bold)),
-                                          const SizedBox(width: 10),
-                                          Icon(Icons.access_time, size: 12, color: Colors.grey),
-                                          const SizedBox(width: 4),
-                                          Text(timeStr, style: TextStyle(fontSize: 12, color: subTextColor)),
-                                        ],
-                                      )
+                                      Container(
+                                        width: 12, height: 12, 
+                                        decoration: BoxDecoration(color: themeProvider.secondaryColor.withOpacity(0.5), shape: BoxShape.circle)
+                                      ),
+                                      if (logs.indexOf(log) != logs.length - 1)
+                                        Container(width: 2, height: 40, color: Colors.grey.withOpacity(0.2)),
                                     ],
                                   ),
-                                )
-                              ],
-                            ),
-                          );
-                        },
+                                  const SizedBox(width: 16),
+                                  
+                                  // İçerik
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(log.action, style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Icon(Icons.person, size: 12, color: Colors.grey),
+                                            const SizedBox(width: 4),
+                                            Text(log.userName, style: TextStyle(fontSize: 12, color: subTextColor, fontWeight: FontWeight.bold)),
+                                            const SizedBox(width: 10),
+                                            Icon(Icons.access_time, size: 12, color: Colors.grey),
+                                            const SizedBox(width: 4),
+                                            Text(timeStr, style: TextStyle(fontSize: 12, color: subTextColor)),
+                                          ],
+                                        )
+                                      ],
+                                    ),
+                                  )
+                                ],
+                              ),
+                            );
+                          }).toList(),
+
+                          // PREMIUM UYARI KARTI (Eğer daha fazla log varsa)
+                          if (hasMore)
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(context, MaterialPageRoute(builder: (context) => const PremiumScreen()));
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.only(top: 10),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.orangeAccent.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.orangeAccent),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.lock, color: Colors.orange),
+                                    const SizedBox(width: 10),
+                                    Text("Geçmişin tamamını görmek için Premium'a geç", style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                            )
+                        ],
                       );
                     },
                   ),
