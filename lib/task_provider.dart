@@ -317,11 +317,13 @@ class TaskProvider extends ChangeNotifier {
   // --- GÖREV İŞLEMLERİ (CRUD) ---
   
   Future<void> addTask(Task task) async {
-    // creatorId: Profil ID
-    if (_currentMember != null) {
-      task.creatorId = _currentMember!.id;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      task.creatorId = user.uid;
     }
-    // ownerId: Auth ID (DatabaseService otomatik ekliyor)
+    
+    // YENİ: Oluşturulma zamanını şu an olarak ayarla
+    task.createdAt = DateTime.now(); 
     
     Task createdTask = await _dbService.createTask(task);
     

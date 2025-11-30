@@ -11,13 +11,14 @@ class Task {
   int priority;
   String? notes;
   String? projectId;
-  String? assignedMemberId; // Kime Atandı?
-  String? creatorId;        // Hangi Profil Oluşturdu? (Member ID)
-  String? ownerId;          // Hangi Hesaba Ait? (Auth UID) <-- YENİ
+  String? assignedMemberId;
+  String? creatorId;
+  String? ownerId;
   List<SubTask> subTasks;
   String recurrence;
   List<String> tags;
   DateTime? lastCommentAt;
+  DateTime? createdAt; // YENİ: Oluşturulma Zamanı
 
   Task({
     this.id,
@@ -30,11 +31,12 @@ class Task {
     this.projectId,
     this.assignedMemberId,
     this.creatorId,
-    this.ownerId, // Constructor
+    this.ownerId,
     List<SubTask>? subTasks,
     this.recurrence = 'none',
     List<String>? tags,
     this.lastCommentAt,
+    this.createdAt, // Constructor
   }) : subTasks = subTasks ?? [],
        tags = tags ?? [];
 
@@ -49,11 +51,12 @@ class Task {
       'projectId': projectId,
       'assignedMemberId': assignedMemberId,
       'creatorId': creatorId,
-      'ownerId': ownerId, // Map
+      'ownerId': ownerId,
       'subTasks': subTasks.map((e) => e.toMap()).toList(),
       'recurrence': recurrence,
       'tags': tags,
       'lastCommentAt': lastCommentAt?.toIso8601String(),
+      'createdAt': createdAt?.toIso8601String(), // Map'e ekle
     };
   }
 
@@ -80,11 +83,13 @@ class Task {
       projectId: map['projectId'],
       assignedMemberId: map['assignedMemberId'],
       creatorId: map['creatorId'],
-      ownerId: map['ownerId'], // Map
+      ownerId: map['ownerId'],
       subTasks: loadedSubTasks,
       recurrence: map['recurrence'] ?? 'none',
       tags: loadedTags,
       lastCommentAt: map['lastCommentAt'] != null ? DateTime.parse(map['lastCommentAt']) : null,
+      // Eğer eski görevlerde tarih yoksa, listenin en altına atmak için eski bir tarih (2000 yılı) veriyoruz
+      createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime(2000), 
     );
   }
 }

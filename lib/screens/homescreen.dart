@@ -17,7 +17,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-enum SortOption { dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
+enum SortOption { newestFirst, dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
 
 class HomeScreen extends StatefulWidget {
   final DatabaseService dbService;
@@ -30,9 +30,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String? _selectedProjectId; 
   String _searchQuery = '';
-  SortOption _currentSortOption = SortOption.dateAsc;
   
-  // "Sadece Bana Ait" Filtresi
+  // Varsayılan sıralama: En Yeni En Üstte
+  SortOption _currentSortOption = SortOption.newestFirst;
+  
+  // "Bana Ait" Filtresi
   bool _showOnlyMyTasks = false; 
 
   final TextEditingController _searchController = TextEditingController();
@@ -80,18 +82,27 @@ class _HomeScreenState extends State<HomeScreen> {
     // 4. Sıralama
     filtered.sort((a, b) {
       switch (_currentSortOption) {
+        case SortOption.newestFirst:
+          // En yeni tarihli (b) en başa (a)
+          // createdAt null ise eski kabul edip sona atıyoruz
+          return (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000));
+          
         case SortOption.dateAsc:
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return a.dueDate!.compareTo(b.dueDate!);
+          
         case SortOption.dateDesc:
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return b.dueDate!.compareTo(a.dueDate!);
+          
         case SortOption.priorityDesc:
           return b.priority.compareTo(a.priority);
+          
         case SortOption.priorityAsc:
           return a.priority.compareTo(b.priority);
+          
         case SortOption.titleAsc:
           return a.title.compareTo(b.title);
       }
@@ -114,6 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: EdgeInsets.all(16.0),
                 child: Text("Sıralama Ölçütü", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
+              _buildSortTile("En Yeni Eklenen (Varsayılan)", SortOption.newestFirst, Icons.new_releases, themeProvider),
               _buildSortTile("Tarih (En Yakın Önce)", SortOption.dateAsc, Icons.calendar_today, themeProvider),
               _buildSortTile("Tarih (En Uzak Önce)", SortOption.dateDesc, Icons.event_repeat, themeProvider),
               _buildSortTile("Öncelik (Yüksek)", SortOption.priorityDesc, Icons.flag, themeProvider),
@@ -191,7 +203,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _navigateToDetail([Task? task]) async {
     final taskProvider = Provider.of<TaskProvider>(context, listen: false);
     
-    // Eğer proje yoksa önce proje eklet (Sadece Admin ise)
     if (taskProvider.projects.isEmpty) {
       if (taskProvider.isAdmin) {
          _showAddProjectDialog(taskProvider);
@@ -221,7 +232,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final allProjects = taskProvider.projects;
     final allTasks = taskProvider.tasks;
 
-    // Seçili Proje Kontrolü
     if (_selectedProjectId == null && allProjects.isNotEmpty) {
         _selectedProjectId = allProjects.first.id;
     } else if (_selectedProjectId != null && allProjects.isNotEmpty) {
@@ -230,7 +240,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }
     }
 
-    // İstatistikler (Filtreden bağımsız, projenin geneli)
     int totalTasks = 0;
     int completedTasks = 0;
     double progress = 0.0;
@@ -244,7 +253,6 @@ class _HomeScreenState extends State<HomeScreen> {
       } catch (e) {}
     }
 
-    // GÖREVLERİ FİLTRELE VE SIRALA
     final processedTasks = _processTasks(allTasks, taskProvider);
     final activeTasksList = processedTasks.where((t) => !t.isDone).toList();
     final completedTasksList = processedTasks.where((t) => t.isDone).toList();
@@ -255,7 +263,6 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
-          // --- DASHBOARD ALANI ---
           SizedBox(
             height: 290,
             child: Stack(
@@ -304,14 +311,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 20),
 
-          // --- PROJE LİSTESİ (Yatay Scroll) ---
           SizedBox(
             height: 50,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 24),
               children: [
-                // YENİ: + Butonu SADECE ADMIN İSE görünür
                 if (taskProvider.isAdmin)
                   GestureDetector(
                     onTap: () => _showAddProjectDialog(taskProvider), 
@@ -331,7 +336,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   return GestureDetector(
                     onTap: () { setState(() => _selectedProjectId = project.id); HapticFeedback.selectionClick(); }, 
                     onLongPress: () { 
-                      // SİLME SADECE ADMIN İSE
                       if (taskProvider.isAdmin) {
                         showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Projeyi Sil"), content: const Text("Bu proje ve içindeki görevler silinsin mi?"), actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("İptal")), TextButton(onPressed: () async { await taskProvider.deleteProject(project.id!); Navigator.pop(ctx); setState(() => _selectedProjectId = null); }, child: const Text("Sil", style: TextStyle(color: Colors.red)))])); 
                       }
@@ -343,12 +347,10 @@ class _HomeScreenState extends State<HomeScreen> {
             )
           ),
 
-          // --- ARAMA VE FİLTRE ALANI ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: Column(
               children: [
-                // Arama Barı
                 Row(
                   children: [
                     Expanded(child: Container(height: 45, decoration: BoxDecoration(color: isDarkMode ? Colors.grey.shade900 : Colors.white, borderRadius: BorderRadius.circular(15), border: Border.all(color: isDarkMode ? Colors.transparent : Colors.grey.shade300)), child: TextField(controller: _searchController, onChanged: (val) => setState(() => _searchQuery = val), style: TextStyle(color: textColor), decoration: InputDecoration(hintText: "Görev Ara...", hintStyle: TextStyle(color: subTextColor), prefixIcon: Icon(Icons.search, color: subTextColor), border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(vertical: 10))))),
@@ -359,7 +361,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 
                 const SizedBox(height: 12),
                 
-                // "TÜMÜ" ve "BANA AİT" FİLTRESİ
                 Container(
                   height: 40,
                   padding: const EdgeInsets.all(4),
@@ -378,7 +379,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // --- GÖREV LİSTESİ ---
           Expanded(
             child: taskProvider.isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -418,7 +418,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Yeni Filtre Sekmesi Yapısı
   Widget _buildFilterTab(String title, bool isActive, ThemeProvider theme) {
     return Expanded(
       child: GestureDetector(
@@ -449,7 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildDismissibleTask(Task task, ThemeProvider themeProvider, TaskProvider taskProvider) {
     
-    // YENİ: KONTROLLÜ TAMAMLAMA MANTIĞI
+    // KONTROLLÜ TAMAMLAMA
     void handleToggle() {
       if (taskProvider.canCompleteTask(task)) {
         taskProvider.toggleTaskStatus(task);
@@ -466,7 +465,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Admin değilse normal kart (Kaydırma yok)
     if (!taskProvider.isAdmin) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12.0),
@@ -474,12 +472,11 @@ class _HomeScreenState extends State<HomeScreen> {
           task: task,
           categories: const {},
           onTap: () => _navigateToDetail(task),
-          onToggleDone: handleToggle, // GÜNCELLENDİ: Artık kontrollü fonksiyonu çağırıyor
+          onToggleDone: handleToggle, 
         ),
       );
     }
     
-    // Admin ise silinebilir kart
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: Dismissible(
@@ -488,7 +485,7 @@ class _HomeScreenState extends State<HomeScreen> {
         secondaryBackground: Container(decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(20)), alignment: Alignment.centerRight, padding: const EdgeInsets.symmetric(horizontal: 20), child: const Icon(Icons.delete_outline, color: Colors.white, size: 32)),
         confirmDismiss: (direction) async {
           if (direction == DismissDirection.startToEnd) { 
-             handleToggle(); // GÜNCELLENDİ: Sağa kaydırınca da kontrol yapıyor
+             handleToggle();
              return false; 
           } else { 
              return true; 
@@ -507,7 +504,7 @@ class _HomeScreenState extends State<HomeScreen> {
           task: task, 
           categories: const {}, 
           onTap: () => _navigateToDetail(task), 
-          onToggleDone: handleToggle // GÜNCELLENDİ: Kutuya basınca da kontrol yapıyor
+          onToggleDone: handleToggle
         ),
       ),
     );

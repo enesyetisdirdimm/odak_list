@@ -2,9 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:odak_list/screens/premium_screen.dart'; // Premium Ekranı
+import 'package:odak_list/screens/premium_screen.dart';
 import 'package:odak_list/screens/team_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
+import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +21,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final AuthService _authService = AuthService();
+  final DatabaseService _dbService = DatabaseService();
+  
   User? _currentUser;
 
   @override
@@ -29,32 +32,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _refreshUser() {
-    setState(() {
-      _currentUser = FirebaseAuth.instance.currentUser;
-    });
+    if (mounted) {
+      setState(() {
+        _currentUser = FirebaseAuth.instance.currentUser;
+      });
+    }
   }
 
-  // --- İSİM DEĞİŞTİRME DİYALOĞU ---
+  // --- İSİM DEĞİŞTİRME DİYALOĞU (DÜZELTİLDİ) ---
   void _showEditNameDialog() {
-    final controller = TextEditingController(text: _currentUser?.displayName);
+    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+    final currentMember = taskProvider.currentMember;
+    
+    // Profil ismini varsayılan olarak al
+    // (Artık Auth ismine fallback yapmıyoruz, profil ismi neyse o)
+    final initialName = currentMember?.name ?? "İsimsiz";
+    final controller = TextEditingController(text: initialName);
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("İsim Değiştir"),
+      builder: (ctx) => AlertDialog(
+        title: const Text("Profil İsmini Değiştir"),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(labelText: "Yeni Ad Soyad", border: OutlineInputBorder()),
+          decoration: const InputDecoration(labelText: "Yeni İsim", border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
           ElevatedButton(
             onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                await _authService.updateName(controller.text.trim());
+              if (controller.text.trim().isEmpty) return;
+
+              final newName = controller.text.trim();
+              
+              // Diyaloğu kapat
+              Navigator.pop(ctx);
+
+              try {
+                // DÜZELTME: Auth servisindeki genel ismi GÜNCELLEMİYORUZ.
+                // await _authService.updateName(newName); <--- BU SATIR SİLİNDİ
+                // Sadece veritabanındaki bu profilin ismini güncelliyoruz.
+
+                if (currentMember != null) {
+                  await _dbService.updateTeamMemberInfo(
+                    currentMember.id, 
+                    newName, 
+                    currentMember.profilePin
+                  );
+                  
+                  // Yerel (Provider) state'i de güncelle ki anında görünsün
+                  currentMember.name = newName;
+                  // Provider'ı uyararak ekranı yenilemesini sağla
+                  // (TaskProvider içindeki notifyListeners tetiklenmeli, 
+                  // ama currentMember referans olduğu için bazen otomatik algılanır)
+                  taskProvider.selectMember(currentMember); // Bu tetiklemeyi sağlar
+                }
+                
                 if (mounted) {
-                  Navigator.pop(context);
                   _refreshUser();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("İsim güncellendi!")));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Profil ismi güncellendi!"))
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Bir hata oluştu."), backgroundColor: Colors.red)
+                  );
                 }
               }
             },
@@ -65,19 +109,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // --- ŞİFRE DEĞİŞTİRME DİYALOĞU (Sadece Admin İçin - Email Şifresi) ---
+  // --- ŞİFRE DEĞİŞTİRME ---
   void _showChangePasswordDialog() {
     final oldPassController = TextEditingController();
     final newPassController = TextEditingController();
     
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         title: const Text("Hesap Şifresini Değiştir"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Bu işlem ana hesabın giriş şifresini değiştirir (En az 6 karakter).", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const Text("Bu işlem ana hesabın giriş şifresini değiştirir.", style: TextStyle(fontSize: 12, color: Colors.grey)),
             const SizedBox(height: 10),
             TextField(
               controller: oldPassController,
@@ -93,22 +137,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
           ElevatedButton(
             onPressed: () async {
               if (newPassController.text.length < 6) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Yeni şifre en az 6 karakter olmalı.")));
+                ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text("En az 6 karakter olmalı.")));
                 return;
               }
+              
+              Navigator.pop(ctx); 
+
               try {
                 await _authService.changePassword(oldPassController.text, newPassController.text);
                 if (mounted) {
-                  Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Şifre başarıyla değiştirildi!")));
                 }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceAll("Exception:", ""))));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Hata: Şifre değiştirilemedi."), backgroundColor: Colors.red));
                 }
               }
             },
@@ -119,23 +165,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // --- HESAPTAN TAMAMEN ÇIKIŞ ---
+  // --- GÜVENLİ ÇIKIŞ ---
   void _signOut() async {
-    // 1. Firebase'den çıkış yap
-    await _authService.signOut();
+    final provider = Provider.of<TaskProvider>(context, listen: false);
     
-    // 2. Provider'daki profili temizle
-    if (mounted) {
-      Provider.of<TaskProvider>(context, listen: false).logoutMember();
-    }
+    try {
+      await _authService.signOut();
+      await provider.logoutMember();
 
-    // 3. Login Ekranına Yönlendir (Geçmişi Silerek)
-    if (mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-        (route) => false, // Tüm geçmiş rotaları sil
-      );
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (route) => false, 
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Çıkış yapılırken hata oluştu.")));
+      }
     }
   }
 
@@ -159,9 +207,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final currentMember = taskProvider.currentMember;
     final isAdmin = taskProvider.isAdmin; 
 
+    // GÖSTERİM: Sadece profil ismini göster. Auth ismine karışma.
     final userName = currentMember?.name ?? "Misafir";
     final userRole = isAdmin ? "Yönetici" : "Editör";
-    final userEmail = FirebaseAuth.instance.currentUser?.email ?? "";
+    final userEmail = _currentUser?.email ?? "";
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -223,52 +272,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // --- İŞLEM BUTONLARI ---
                 Row(
                   children: [
-                    // BUTON 1: ŞİFRE DEĞİŞTİR (SADECE ADMİN)
                     if (isAdmin) ...[
                       Expanded(
                         child: ElevatedButton.icon(
                           onPressed: _showChangePasswordDialog, 
                           icon: const Icon(Icons.lock_outline, size: 16),
                           label: const Text("Şifre"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white.withOpacity(0.2),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.white.withOpacity(0.2), foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), padding: const EdgeInsets.symmetric(vertical: 12)),
                         ),
                       ),
                       const SizedBox(width: 10),
                     ],
                     
-                    // BUTON 2: PROFİL DEĞİŞTİR (HERKES)
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: () {
-                           taskProvider.logoutMember(); 
-                           Navigator.pushAndRemoveUntil(
-                             context, 
-                             MaterialPageRoute(builder: (context) => const ProfileSelectScreen()),
-                             (route) => false
-                           );
+                        onPressed: () async {
+                           await taskProvider.logoutMember(); 
+                           if (context.mounted) {
+                             Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const ProfileSelectScreen()), (route) => false);
+                           }
                         },
                         icon: const Icon(Icons.switch_account, size: 16),
                         label: const Text("Profil Değiş"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: themeProvider.primaryColor,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: themeProvider.primaryColor, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), padding: const EdgeInsets.symmetric(vertical: 12)),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
 
-                // BUTON 3: TAMAMEN ÇIKIŞ YAP (HERKES)
                 SizedBox(
                   width: double.infinity,
                   child: TextButton.icon(
@@ -283,114 +315,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          // --- PREMIUM BANNER (YENİ) ---
+          // --- PREMIUM BANNER ---
           GestureDetector(
-            onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const PremiumScreen()));
-            },
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PremiumScreen())),
             child: Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFFFFD700), Color(0xFFFFA500)]), // Altın Rengi
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: [
-                  BoxShadow(color: Colors.orange.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                    child: const Icon(Icons.star, color: Colors.orange, size: 24),
-                  ),
-                  const SizedBox(width: 15),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("Premium'a Yükselt", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                        Text("Tüm özellikleri aç & Ekibini güçlendir!", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16),
-                ],
-              ),
+              decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFFD700), Color(0xFFFFA500)]), borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.orange.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))]),
+              child: Row(children: [Container(padding: const EdgeInsets.all(10), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: const Icon(Icons.star, color: Colors.orange, size: 24)), const SizedBox(width: 15), const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Premium'a Yükselt", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), Text("Tüm özellikleri aç & Ekibini güçlendir!", style: TextStyle(color: Colors.white70, fontSize: 12))])), const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16)]),
             ),
           ),
           
           const SizedBox(height: 30),
 
-          // --- EKİP YÖNETİMİ BUTONU (Sadece Admin Görür) ---
+          // --- EKİP YÖNETİMİ ---
           if (isAdmin)
             Column(
               children: [
                 Text("Yönetim", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                 const SizedBox(height: 10),
                 Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(15),
-                  ),
+                  decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(15)),
                   child: ListTile(
                     leading: const Icon(Icons.people_alt, color: Colors.purple),
                     title: Text("Ekip ve Rol Yönetimi", style: TextStyle(color: textColor)),
                     subtitle: const Text("Kişi ekle, sil veya PIN değiştir", style: TextStyle(fontSize: 12, color: Colors.grey)),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                    onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (context) => const TeamScreen()));
-                    },
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const TeamScreen())),
                   ),
                 ),
                 const SizedBox(height: 30),
               ],
             ),
 
-          // --- DİĞER AYARLAR (Standart) ---
+          // --- GÖRÜNÜM ---
           Text("Görünüm", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
           const SizedBox(height: 10),
           Container(
             decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(15)),
-            child: SwitchListTile(
-              title: Text("Karanlık Mod", style: TextStyle(color: textColor)),
-              secondary: Icon(Icons.dark_mode, color: themeProvider.secondaryColor),
-              value: isDarkMode,
-              activeColor: themeProvider.secondaryColor,
-              onChanged: (val) => themeProvider.toggleTheme(val),
-            ),
+            child: SwitchListTile(title: Text("Karanlık Mod", style: TextStyle(color: textColor)), secondary: Icon(Icons.dark_mode, color: themeProvider.secondaryColor), value: isDarkMode, activeColor: themeProvider.secondaryColor, onChanged: (val) => themeProvider.toggleTheme(val)),
           ),
           const SizedBox(height: 30),
 
           Text("Tema Rengi", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
           const SizedBox(height: 10),
-          SizedBox(
-            height: 70,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: colorPalettes.length,
-              itemBuilder: (context, index) {
-                final palette = colorPalettes[index];
-                final isSelected = themeProvider.currentGradient.colors[0] == palette['start'];
-                return GestureDetector(
-                  onTap: () {
-                    themeProvider.setGradient(LinearGradient(colors: [palette['start'], palette['end']], begin: Alignment.topLeft, end: Alignment.bottomRight));
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 12),
-                    width: 50,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(colors: [palette['start'], palette['end']]),
-                      border: isSelected ? Border.all(color: textColor, width: 3) : null,
-                      boxShadow: [BoxShadow(color: (palette['start'] as Color).withOpacity(0.4), blurRadius: 5, offset: const Offset(0, 3))]
-                    ),
-                    child: isSelected ? const Icon(Icons.check, color: Colors.white) : null,
-                  ),
-                );
-              },
-            ),
-          ),
+          SizedBox(height: 70, child: ListView.builder(scrollDirection: Axis.horizontal, itemCount: colorPalettes.length, itemBuilder: (context, index) { final palette = colorPalettes[index]; final isSelected = themeProvider.currentGradient.colors[0] == palette['start']; return GestureDetector(onTap: () { themeProvider.setGradient(LinearGradient(colors: [palette['start'], palette['end']], begin: Alignment.topLeft, end: Alignment.bottomRight)); }, child: Container(margin: const EdgeInsets.only(right: 12), width: 50, decoration: BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [palette['start'], palette['end']]), border: isSelected ? Border.all(color: textColor, width: 3) : null, boxShadow: [BoxShadow(color: (palette['start'] as Color).withOpacity(0.4), blurRadius: 5, offset: const Offset(0, 3))]), child: isSelected ? const Icon(Icons.check, color: Colors.white) : null)); })),
           const SizedBox(height: 30),
 
           Text("Geri Bildirim", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
@@ -406,7 +374,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 30),
-          Center(child: Text("Versiyon 1.4.1 (Pro)", style: TextStyle(color: Colors.grey.shade500))),
+          Center(child: Text("Versiyon 1.6.2 (Pro)", style: TextStyle(color: Colors.grey.shade500))),
         ],
       ),
     );

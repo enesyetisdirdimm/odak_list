@@ -1,14 +1,65 @@
+// Dosya: lib/screens/team_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:odak_list/models/team_member.dart';
 import 'package:odak_list/services/database_service.dart';
 import 'package:odak_list/task_provider.dart';
+import 'package:odak_list/screens/premium_screen.dart'; // Premium Kontrolü İçin
 import 'package:provider/provider.dart';
-import 'package:odak_list/screens/premium_screen.dart';
 
 class TeamScreen extends StatelessWidget {
   const TeamScreen({super.key});
 
-  // Yönetim ekranından yeni profil ekleme (Ayarların içinden)
+  // YENİ: DÜZENLEME DİYALOĞU
+  void _showEditMemberDialog(BuildContext context, TeamMember member) {
+    final nameController = TextEditingController(text: member.name);
+    final pinController = TextEditingController(text: member.profilePin);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("${member.name} Düzenle"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: "İsim"),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: pinController,
+              decoration: const InputDecoration(
+                labelText: "Profil Pini (4 Hane)",
+                hintText: "Boş bırakırsanız şifresiz olur",
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isNotEmpty) {
+                String? newPin = pinController.text.isEmpty ? null : pinController.text;
+                
+                // Veritabanında güncelle
+                await DatabaseService().updateTeamMemberInfo(member.id, nameController.text, newPin);
+                
+                if (ctx.mounted) Navigator.pop(ctx);
+              }
+            },
+            child: const Text("Kaydet"),
+          )
+        ],
+      ),
+    );
+  }
+
+  // YENİ KİŞİ EKLEME (Mevcut kodun aynısı, sadece premium kontrolü eklendi)
   void _addMemberFromSettings(BuildContext context) {
     final nameController = TextEditingController();
     final pinController = TextEditingController();
@@ -77,26 +128,13 @@ class TeamScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text("Ekip ve Roller")),
-      // YENİ: Admin buradan da kişi ekleyebilmeli
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          // 1. Mevcut Üye Sayısını Kontrol Et (Async işlem gerektiği için biraz farklı)
-          // Stream'den son veriyi alamayız, veritabanına soralım.
-          
-          final dbService = DatabaseService();
-          // Not: Bu listeyi StreamBuilder zaten çekiyor ama butonun içinde o veriye erişmek için
-          // en temiz yol ya Provider kullanmak ya da anlık DB sorgusu atmaktır.
-          // Burada basitlik adına DB sorgusu atıyoruz.
-          
+          // PREMIUM KONTROLÜ (3 Kişi Sınırı)
           bool isPremium = await dbService.checkPremiumStatus();
-          
-          // Mevcut üyeleri çek
-          // (Not: Bu fonksiyonu DatabaseService'e eklemediysek aşağıda vereceğim)
-          var membersSnapshot = await DatabaseService().getTeamMembersCollection().get();
+          var membersSnapshot = await dbService.getTeamMembersCollection().get();
           int memberCount = membersSnapshot.docs.length;
 
-          // KISITLAMA MANTIĞI:
-          // Premium değilse VE Üye sayısı 3 veya fazlaysa -> DURDUR
           if (!isPremium && memberCount >= 3) {
              if (context.mounted) {
                Navigator.push(context, MaterialPageRoute(builder: (context) => const PremiumScreen()));
@@ -104,7 +142,6 @@ class TeamScreen extends StatelessWidget {
              return;
           }
 
-          // Sorun yoksa ekleme diyaloğunu aç
           if (context.mounted) {
             _addMemberFromSettings(context);
           }
@@ -134,7 +171,7 @@ class TeamScreen extends StatelessWidget {
                     children: [
                       CircleAvatar(
                         backgroundColor: isMe ? Colors.blueAccent : (member.role == 'admin' ? Colors.purple.shade100 : Colors.grey.shade300),
-                        child: Text(member.name[0].toUpperCase(), style: TextStyle(color: isMe ? Colors.white : Colors.black)),
+                        child: Text(member.name.isNotEmpty ? member.name[0].toUpperCase() : "?", style: TextStyle(color: isMe ? Colors.white : Colors.black)),
                       ),
                       if (hasPin) const Positioned(right: 0, bottom: 0, child: Icon(Icons.lock, size: 14))
                     ],
@@ -144,6 +181,7 @@ class TeamScreen extends StatelessWidget {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // ROL DEĞİŞTİRME (Dropdown)
                       DropdownButton<String>(
                         value: member.role,
                         underline: const SizedBox(),
@@ -161,6 +199,14 @@ class TeamScreen extends StatelessWidget {
                           }
                         },
                       ),
+                      
+                      // YENİ: DÜZENLEME BUTONU (Kalem)
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        onPressed: () => _showEditMemberDialog(context, member),
+                      ),
+
+                      // SİLME BUTONU
                       if (!isMe)
                         IconButton(
                           icon: const Icon(Icons.delete, color: Colors.red),

@@ -145,6 +145,16 @@ class DatabaseService {
     await _db.collection('users').doc(uid).collection('members').doc(memberId).update({'role': newRole});
   }
 
+  Future<void> updateTeamMemberInfo(String memberId, String name, String? pin) async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    
+    await _db.collection('users').doc(uid).collection('members').doc(memberId).update({
+      'name': name,
+      'profilePin': pin,
+    });
+  }
+
   // Profil Sil
   Future<void> deleteTeamMember(String memberId) async {
     String? uid = _auth.currentUser?.uid;
