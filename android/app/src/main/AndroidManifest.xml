@@ -10,7 +10,7 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     
     <application
-        android:label="odak_list"
+        android:label="CoFocus"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
         android:showWhenLocked="true"
@@ -49,7 +49,7 @@
             </intent-filter>
         </receiver>
 
-    <receiver android:name=".OdakWidget" android:exported="true">
+    <receiver android:name=".CoFocusWidget" android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>

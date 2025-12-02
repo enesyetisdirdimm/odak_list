@@ -19,8 +19,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   final List<Map<String, String>> _pages = [
     {
-      "title": "OdakList'e Hoşgeldin!",
-      "desc": "Görevlerini planla, projelerini yönet ve hayatını düzene sok.",
+      "title": "CoFocus'a Hoşgeldin!",
+      "desc": "Ekibinle senkronize ol, görevleri yönet ve birlikte başar.",
       "image": "assets/icon.png" 
     },
     {

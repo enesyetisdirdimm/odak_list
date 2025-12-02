@@ -132,7 +132,7 @@ class _PremiumScreenState extends State<PremiumScreen> {
                   const SizedBox(height: 10),
                   const Icon(Icons.workspace_premium, size: 80, color: Colors.orangeAccent),
                   const SizedBox(height: 16),
-                  const Text("OdakList Premium", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                  const Text("CoFocus Premium", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                   const Text("Ekibini bir üst seviyeye taşı!", style: TextStyle(fontSize: 16, color: Colors.grey)),
                   const SizedBox(height: 30),
                   
