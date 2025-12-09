@@ -1,6 +1,5 @@
-// lib/screens/login_screen.dart
-
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:odak_list/screens/profile_select_screen.dart'; 
 import 'package:odak_list/screens/verify_email_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
@@ -26,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
   final DatabaseService _dbService = DatabaseService();
 
-  // --- ŞİFRE SIFIRLAMA DİYALOĞU (YENİ) ---
+  // --- ŞİFRE SIFIRLAMA DİYALOĞU ---
   void _showForgotPasswordDialog() {
     final resetEmailController = TextEditingController();
     showDialog(
@@ -77,6 +76,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
     final pin = _pinController.text.trim();
 
+    // Temel Kontroller
     if (email.isEmpty || password.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Lütfen geçerli bir email ve en az 6 haneli şifre girin."))
@@ -86,11 +86,15 @@ class _LoginScreenState extends State<LoginScreen> {
     
     if (!isLogin) {
       if (name.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen adınızı girin.")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Lütfen adınızı girin."))
+        );
         return;
       }
       if (pin.length != 4) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Admin profili için 4 haneli bir PIN girin.")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Admin profili için 4 haneli bir PIN girin."))
+        );
         return;
       }
     }
@@ -99,29 +103,71 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       if (isLogin) {
-        await _authService.signIn(email, password);
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const ProfileSelectScreen()),
-          );
+        // --- GİRİŞ YAP ---
+        // AuthService'deki signIn, kullanıcı yoksa hata fırlatacak.
+        User? user = await _authService.signIn(email, password);
+        
+        if (user != null) {
+          // Cache sorununu önlemek için sunucudan son durumu çekiyoruz
+          await user.reload(); 
+          User? refreshedUser = FirebaseAuth.instance.currentUser;
+
+          if (mounted) {
+             // 1. Mail Onaylı mı?
+             if (refreshedUser != null && refreshedUser.emailVerified) {
+               // ONAYLI -> Profil Seçimine Git
+               Navigator.pushReplacement(
+                 context,
+                 MaterialPageRoute(builder: (context) => const ProfileSelectScreen()),
+               );
+             } else {
+               // ONAYSIZ -> Doğrulama Ekranına Git
+               ScaffoldMessenger.of(context).showSnackBar(
+                 const SnackBar(content: Text("Lütfen önce mail adresinizi doğrulayın."))
+               );
+               Navigator.pushReplacement(
+                 context,
+                 MaterialPageRoute(builder: (context) => const VerifyEmailScreen()),
+               );
+             }
+          }
         }
       } else {
-        await _authService.signUp(email, password, name);
-        await _dbService.createInitialAdminProfile(name, pin);
+        // --- KAYIT OL ---
+        User? user = await _authService.signUp(email, password, name);
         
-        if (mounted) {
-           await _authService.sendEmailVerification();
-           Navigator.pushReplacement(
-             context,
-             MaterialPageRoute(builder: (context) => const VerifyEmailScreen()), 
-           );
+        if (user != null) {
+          // 1. Hemen veritabanı profilini oluştur (Profil ekranı boş gelmesin diye)
+          await _dbService.createInitialAdminProfile(name, pin);
+          
+          // 2. Doğrulama mailini gönder
+          await _authService.sendEmailVerification();
+          
+          // 3. Doğrulama ekranına yönlendir
+          if (mounted) {
+             Navigator.pushReplacement(
+               context,
+               MaterialPageRoute(builder: (context) => const VerifyEmailScreen()), 
+             );
+          }
         }
       }
     } catch (e) {
+      // HATA YÖNETİMİ
       if (mounted) {
+        String errorMessage = e.toString().replaceAll("Exception:", "").trim();
+        
+        // Kullanıcı dostu hata mesajı
+        if (errorMessage.contains("user-not-found") || errorMessage.contains("Kullanıcı bulunamadı")) {
+          errorMessage = "Böyle bir mail adresi kayıtlı değil. Lütfen önce 'Kayıt Ol' butonuna basın.";
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceAll("Exception:", "")))
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          )
         );
       }
     } finally {
@@ -147,6 +193,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 40),
 
+              // Kayıt Ol Formu (İsim ve Pin sadece kayıt olurken görünür)
               if (!isLogin) ...[
                 TextField(
                   controller: _nameController,
@@ -205,6 +252,7 @@ class _LoginScreenState extends State<LoginScreen> {
               else
                 const SizedBox(height: 24),
 
+              // Buton
               isLoading 
                 ? const CircularProgressIndicator()
                 : SizedBox(

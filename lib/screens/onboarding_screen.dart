@@ -37,11 +37,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _finishOnboarding() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('seenOnboarding', true); // "Gördüm" diye işaretle
+    await prefs.setBool('seenOnboarding', true);
 
     if (!mounted) return;
     
-    // Direkt Login ekranına yönlendir
     Navigator.pushReplacement(
       context, 
       MaterialPageRoute(builder: (context) => const LoginScreen())
@@ -66,32 +65,37 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // --- GÖRSEL ALANI ---
+                        // --- GÖRSEL ALANI (DÜZELTİLDİ) ---
                         Container(
                           height: 200, width: 200,
                           decoration: const BoxDecoration(
-                            // İstenilen arka plan rengi (#2c333b)
-                            color: Color(0xFF2C333B),
+                            color: Color(0xFF2C333B), // Arka plan rengi
                             shape: BoxShape.circle,
+                            // Hafif gölge ekleyelim ki daha şık dursun
+                            boxShadow: [
+                              BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 5))
+                            ]
                           ),
                           child: index == 0 
-                            ? Padding(
-                                // Resim kenarlara yapışmasın diye boşluk
-                                padding: const EdgeInsets.all(30.0),
-                                child: Image.asset(
-                                  "assets/icon.png", 
-                                  fit: BoxFit.contain
+                            ? ClipOval( // <--- İŞTE SİHİR BURADA: Resmi yuvarlak kesiyor
+                                child: Padding(
+                                  // Eğer logonun kenarlarında boşluk yoksa bu padding'i 0 yapabilirsin
+                                  padding: const EdgeInsets.all(0.0), 
+                                  child: Image.asset(
+                                    "assets/icon.png", 
+                                    fit: BoxFit.cover, // Resmi daireye tam sığdır
+                                  ),
                                 ),
                               )
                             : Icon(
                                 index == 1 ? Icons.timer : Icons.widgets, 
-                                size: 80, // İkon boyutu daha dengeli
-                                color: const Color(0xFF00E5FF) // Cam Göbeği Mavi
+                                size: 80, 
+                                color: const Color(0xFF00E5FF)
                               ),
                         ),
-                        
+                        // ---------------------------------
+
                         const SizedBox(height: 40),
-                        
                         Text(
                           _pages[index]["title"]!,
                           style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
@@ -110,7 +114,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
             
-            // Alt Kısım: Noktalar ve Buton
+            // Alt Kısım
             Padding(
               padding: const EdgeInsets.all(30.0),
               child: Row(
@@ -126,14 +130,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         height: 8,
                         width: _currentPage == index ? 24 : 8,
                         decoration: BoxDecoration(
-                          color: _currentPage == index ? const Color(0xFF00E5FF) : Colors.grey,
+                          color: _currentPage == index ? const Color(0xFF00E5FF) : Colors.grey.shade700,
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
                     ),
                   ),
 
-                  // İleri / Başla Butonu
+                  // İleri Butonu
                   ElevatedButton(
                     onPressed: () {
                       if (_currentPage == _pages.length - 1) {

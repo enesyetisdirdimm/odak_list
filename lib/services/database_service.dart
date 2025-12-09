@@ -80,13 +80,20 @@ class DatabaseService {
     await _tasksRef.doc(task.id).update(task.toMap());
   }
 
-  Future<void> deleteProject(String id) async {
-    await _projectsRef.doc(id).delete();
-    // Projeye bağlı görevleri de sil
-    var tasks = await _tasksRef.where('projectId', isEqualTo: id).get();
-    for (var doc in tasks.docs) {
-      await doc.reference.delete();
+ Future<void> deleteProject(String projectId) async {
+    WriteBatch batch = _db.batch();
+
+    // 1. Projenin Kendisini Sil
+    batch.delete(_projectsRef.doc(projectId));
+
+    // 2. Projeye Bağlı Tüm Görevleri Bul ve Sil
+    var tasksSnapshot = await _tasksRef.where('projectId', isEqualTo: projectId).get();
+    for (var doc in tasksSnapshot.docs) {
+      batch.delete(doc.reference);
     }
+
+    // 3. Hepsini Tek Seferde Uygula (Atomik İşlem)
+    await batch.commit();
   }
 
   Future<void> deleteTask(String id) async {
@@ -316,5 +323,31 @@ class DatabaseService {
     }
     
     return updatedCount;
+  }
+
+  Future<void> restoreProject(Project project) async {
+    if (project.id == null) return;
+    await _projectsRef.doc(project.id).set(project.toMap());
+  }
+
+  // Görevi eski ID'siyle geri yükle
+  Future<void> restoreTask(Task task) async {
+    if (task.id == null) return;
+    await _tasksRef.doc(task.id).set(task.toMap());
+  }
+
+  Future<void> moveTasksToProject(String oldProjectId, String newProjectId) async {
+    // 1. Eski projedeki görevleri bul
+    var tasksSnapshot = await _tasksRef.where('projectId', isEqualTo: oldProjectId).get();
+    
+    WriteBatch batch = _db.batch();
+
+    // 2. Her görevin projectId'sini güncelle
+    for (var doc in tasksSnapshot.docs) {
+      batch.update(doc.reference, {'projectId': newProjectId});
+    }
+    
+    // 3. Kaydet
+    await batch.commit();
   }
 }

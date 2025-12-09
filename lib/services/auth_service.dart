@@ -1,5 +1,3 @@
-// Dosya: lib/services/auth_service.dart
-
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AuthService {
@@ -16,8 +14,15 @@ class AuthService {
         password: password
       );
       return result.user;
+    } on FirebaseAuthException catch (e) {
+      // Hataları yakalayıp özel mesajlar fırlatıyoruz
+      if (e.code == 'user-not-found' || e.code == 'invalid-credential' || e.code == 'wrong-password') {
+        throw Exception("Kullanıcı bulunamadı veya şifre hatalı.");
+      } else {
+        throw Exception("Giriş hatası: ${e.message}");
+      }
     } catch (e) {
-      throw Exception("Giriş başarısız: Şifre veya mail hatalı.");
+      throw Exception("Bir hata oluştu: $e");
     }
   }
 
@@ -42,7 +47,7 @@ class AuthService {
     }
   }
 
-  // --- DOĞRULAMA MAİLİ GÖNDER (YENİ) ---
+  // --- DOĞRULAMA MAİLİ GÖNDER ---
   Future<void> sendEmailVerification() async {
     User? user = _auth.currentUser;
     if (user != null && !user.emailVerified) {
@@ -50,13 +55,13 @@ class AuthService {
     }
   }
 
-  // --- DOĞRULAMA DURUMUNU KONTROL ET (YENİ) ---
+  // --- DOĞRULAMA DURUMUNU KONTROL ET ---
   // Firebase verisi anlık güncellenmez, elle reload yapıp kontrol etmeliyiz.
   Future<bool> checkEmailVerified() async {
     User? user = _auth.currentUser;
     if (user != null) {
       await user.reload(); // Sunucudan son durumu çek
-      return _auth.currentUser!.emailVerified;
+      return FirebaseAuth.instance.currentUser!.emailVerified;
     }
     return false;
   }
@@ -91,6 +96,7 @@ class AuthService {
     }
   }
 
+  // --- ŞİFRE SIFIRLAMA MAİLİ (Forgot Password) ---
   Future<void> sendPasswordResetEmail(String email) async {
     try {
       await _auth.sendPasswordResetEmail(email: email);

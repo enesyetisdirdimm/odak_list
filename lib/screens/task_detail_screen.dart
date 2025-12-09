@@ -1,4 +1,4 @@
-// lib/screens/task_detail_screen.dart
+// Dosya: lib/screens/task_detail_screen.dart
 
 import 'dart:io'; // Dosya işlemleri için
 import 'package:flutter/material.dart';
@@ -67,10 +67,12 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
       projectId: widget.task.projectId,
       assignedMemberId: widget.task.assignedMemberId,
       creatorId: widget.task.creatorId,
+      ownerId: widget.task.ownerId, // SAHİP BİLGİSİNİ KORU (Çok Önemli)
       subTasks: List.from(widget.task.subTasks),
       recurrence: widget.task.recurrence,
       tags: List.from(widget.task.tags),
       lastCommentAt: widget.task.lastCommentAt,
+      createdAt: widget.task.createdAt,
     );
 
     _titleController = TextEditingController(text: _tempTask.title);
@@ -292,7 +294,6 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
     }
 
     _commentController.clear();
-    // FocusScope.of(context).unfocus(); // Klavyeyi kapatmak istersen açabilirsin
   }
 
   @override
@@ -458,7 +459,6 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> with SingleTickerPr
                     decoration: const InputDecoration(
                       labelText: "Görev Sorumlusu",
                       prefixIcon: Icon(Icons.person_outline, color: Colors.grey),
-                      // Alt çizgi rengini tema ile uyumlu yapıyoruz
                       enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
                     ),
                     dropdownColor: isDarkMode ? AppColors.cardDark : Colors.white,

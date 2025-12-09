@@ -30,7 +30,7 @@ class TaskProvider extends ChangeNotifier {
   List<Project> _projects = [];
   List<TeamMember> _teamMembers = []; 
   
-  // Uygulama açılışında profil kontrolü için
+  // Uygulama açılışında profil kontrolü bitene kadar true kalır
   bool _isLoading = true;
   
   bool _isSoundEnabled = true;
@@ -72,10 +72,10 @@ class TaskProvider extends ChangeNotifier {
   Future<void> selectMember(TeamMember member) async {
     _currentMember = member;
     
-    // 1. Premium Durumunu Kontrol Et ve Kaydet
+    // 1. Premium Durumunu Kontrol Et
     _isPremium = await _dbService.checkPremiumStatus();
 
-    // 2. FCM TOKEN İŞLEMLERİ
+    // 2. FCM TOKEN İŞLEMLERİ (Push Bildirim İçin)
     try {
       FirebaseMessaging messaging = FirebaseMessaging.instance;
       NotificationSettings settings = await messaging.requestPermission(
@@ -85,6 +85,7 @@ class TaskProvider extends ChangeNotifier {
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
         String? token = await messaging.getToken();
         if (token != null) {
+          // Veritabanına kaydet
           await _dbService.updateMemberToken(member.id, token);
         }
       }
@@ -169,6 +170,7 @@ class TaskProvider extends ChangeNotifier {
             // Profil yüklendiği için bildirimleri de tazele
             _refreshNotifications();
           } catch (e) {
+            // Kişi silinmiş olabilir, hafızayı temizle
             await prefs.remove('saved_member_id');
           }
         }
@@ -250,8 +252,25 @@ class TaskProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Görevi "Okundu" işaretle (Saat farkı düzeltmesiyle)
   Future<void> markTaskAsRead(String taskId) async {
-    final now = DateTime.now();
+    DateTime now = DateTime.now();
+    
+    // 1. Görevi listeden bul
+    try {
+      final task = _tasks.firstWhere((t) => t.id == taskId);
+      
+      // 2. Eğer görevin son yorum tarihi varsa ve bizim saatimizden ilerideyse
+      // (veya eşitse), okundu sayılmak için tarihi yorum tarihinden biraz sonraya al.
+      if (task.lastCommentAt != null) {
+        if (task.lastCommentAt!.isAfter(now) || task.lastCommentAt!.isAtSameMomentAs(now)) {
+          now = task.lastCommentAt!.add(const Duration(seconds: 1));
+        }
+      }
+    } catch (e) {
+      // Görev bulunamazsa normal devam et
+    }
+
     _taskLastViewed[taskId] = now; 
     
     final prefs = await SharedPreferences.getInstance();
@@ -264,8 +283,11 @@ class TaskProvider extends ChangeNotifier {
     if (task.id == null || task.lastCommentAt == null) return false;
     
     DateTime? lastViewed = _taskLastViewed[task.id!];
+    
+    // Eğer hiç görmediyse (null) ve yorum varsa -> UNREAD
     if (lastViewed == null) return true; 
     
+    // Son yorum tarihi > Son görme tarihi ise -> UNREAD
     return task.lastCommentAt!.isAfter(lastViewed);
   }
 
@@ -317,16 +339,18 @@ class TaskProvider extends ChangeNotifier {
   // --- GÖREV İŞLEMLERİ (CRUD) ---
   
   Future<void> addTask(Task task) async {
+    // DÜZELTME: creatorId, Auth UID olmalı ki Cloud Function doğru klasöre baksın.
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       task.creatorId = user.uid;
     }
     
-    // YENİ: Oluşturulma zamanını şu an olarak ayarla
-    task.createdAt = DateTime.now(); 
+    // Oluşturulma zamanını ekle
+    task.createdAt = DateTime.now();
     
     Task createdTask = await _dbService.createTask(task);
     
+    // Log kaydında isim görünmesi için member ismini kullanabiliriz
     if (_currentMember != null) {
       await _dbService.addActivityLog(
         createdTask.id!, 
@@ -451,7 +475,36 @@ class TaskProvider extends ChangeNotifier {
     await _dbService.createProject(project);
   }
 
-  Future<void> deleteProject(String id) async {
-    await _dbService.deleteProject(id);
+  Future<bool> deleteProject(String projectId) async {
+    // 1. Son Proje Kontrolü
+   /* if (_projects.length <= 1) {
+      return false; // Silme başarısız (Son proje silinemez)
+    }*/
+
+    // 2. Veritabanından Sil
+    await _dbService.deleteProject(projectId);
+
+    // 3. Eğer sildiğimiz proje şu an ekranda açıksa, başkasına geç (Hata vermesin)
+    // Not: UI tarafında _selectedProjectId'yi kontrol edeceğiz ama burada da listeyi tazeleyelim.
+    return true; // Başarılı
+  }
+  Future<void> restoreProjectData(Project project, List<Task> projectTasks) async {
+    // 1. Projeyi geri getir
+    await _dbService.restoreProject(project);
+    
+    // 2. İçindeki görevleri tek tek geri getir
+    for (var task in projectTasks) {
+      await _dbService.restoreTask(task);
+    }
+    
+    // Not: Stream dinlediği için listeler otomatik güncellenir
+  }
+  
+  Future<void> deleteProjectWithTransfer(String projectId, String targetProjectId) async {
+    // 1. Görevleri yeni projeye taşı
+    await _dbService.moveTasksToProject(projectId, targetProjectId);
+    
+    // 2. Eski projeyi sil (Artık içi boş olduğu için güvenli)
+    await _dbService.deleteProject(projectId);
   }
 }

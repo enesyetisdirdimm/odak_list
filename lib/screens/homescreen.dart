@@ -17,6 +17,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+// Sıralama seçenekleri
 enum SortOption { newestFirst, dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
 
 class HomeScreen extends StatefulWidget {
@@ -49,6 +50,106 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _showTransferDialog(Project project, List<Project> otherProjects, TaskProvider provider) {
+    String selectedTargetId = otherProjects.first.id!;
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text("Görevleri Aktar"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("'${project.title}' içindeki görevleri şuraya taşı:", style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                value: selectedTargetId,
+                isExpanded: true,
+                decoration: const InputDecoration(border: OutlineInputBorder()),
+                items: otherProjects.map((p) => DropdownMenuItem(
+                  value: p.id,
+                  child: Text(p.title),
+                )).toList(),
+                onChanged: (val) => setState(() => selectedTargetId = val!),
+              ),
+              const SizedBox(height: 10),
+              const Text("Aktarma işleminden sonra bu proje silinecektir.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
+            ElevatedButton(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                Navigator.pop(ctx);
+                
+                await provider.deleteProjectWithTransfer(project.id!, selectedTargetId);
+                
+                if (mounted && _selectedProjectId == project.id) {
+                   setState(() => _selectedProjectId = selectedTargetId);
+                }
+                
+                messenger.showSnackBar(const SnackBar(content: Text("Görevler aktarıldı ve proje silindi.")));
+              },
+              child: const Text("Aktar ve Sil"),
+            )
+          ],
+        )
+      )
+    );
+  }
+
+  // --- 2. FONKSİYON: DİREKT SİLME DİYALOĞU ---
+  void _confirmDelete(Project project, TaskProvider provider, int taskCount, List<Task> allTasks, ThemeProvider themeProvider) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Projeyi Sil"),
+        content: taskCount > 0
+          ? Text("⚠️ Bu projede $taskCount adet görev var.\nSilerseniz görevler de kalıcı olarak silinecek!\nDevam etmek istiyor musunuz?")
+          : const Text("Bu boş projeyi silmek istiyor musunuz?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+               final messenger = ScaffoldMessenger.of(context);
+               
+               // Yedekle
+               final projectBackup = project;
+               final tasksBackup = allTasks.where((t) => t.projectId == project.id).toList();
+
+               await provider.deleteProject(project.id!);
+               
+               Navigator.pop(ctx);
+               if (mounted && _selectedProjectId == project.id) {
+                 setState(() => _selectedProjectId = null);
+               }
+               
+               // Geri Alma Seçeneği
+               messenger.showSnackBar(
+                 SnackBar(
+                   content: Text("'${project.title}' silindi."),
+                   duration: const Duration(seconds: 4),
+                   action: SnackBarAction(
+                     label: 'GERİ AL',
+                     textColor: themeProvider.secondaryColor,
+                     onPressed: () async {
+                        await provider.restoreProjectData(projectBackup, tasksBackup);
+                     },
+                   ),
+                 ),
+               );
+            },
+            child: const Text("Sil"),
+          )
+        ],
+      ),
+    );
   }
 
   List<Task> _processTasks(List<Task> allTasks, TaskProvider provider) {
@@ -231,6 +332,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final allProjects = taskProvider.projects;
     final allTasks = taskProvider.tasks;
+    
+    // Tarih
+    String dateStr = DateFormat('d MMMM, EEEE', 'tr_TR').format(DateTime.now());
 
     if (_selectedProjectId == null && allProjects.isNotEmpty) {
         _selectedProjectId = allProjects.first.id;
@@ -256,38 +360,59 @@ class _HomeScreenState extends State<HomeScreen> {
     final processedTasks = _processTasks(allTasks, taskProvider);
     final activeTasksList = processedTasks.where((t) => !t.isDone).toList();
     final completedTasksList = processedTasks.where((t) => t.isDone).toList();
-    
-    String dateStr = DateFormat('d MMMM, EEEE', 'tr_TR').format(DateTime.now());
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
+          // --- COMPACT HEADER ---
           SizedBox(
-            height: 290,
+            height: 230, 
             child: Stack(
               children: [
                 Container(
-                  height: 230, width: double.infinity,
-                  decoration: BoxDecoration(gradient: themeProvider.currentGradient, borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30))),
-                  padding: const EdgeInsets.only(left: 24, right: 24, top: 50),
-                  child: Column(
+                  height: 170, 
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    gradient: themeProvider.currentGradient, 
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(30), 
+                      bottomRight: Radius.circular(30)
+                    )
+                  ),
+                  padding: const EdgeInsets.only(left: 24, right: 24, top: 55), 
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Icon(Icons.menu, color: Colors.white.withOpacity(0.9)),
-                          GestureDetector(
-                            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())),
-                            child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.settings, color: Colors.white, size: 24)),
-                          ),
-                        ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              "Merhaba, $displayName! 👋", 
+                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1, 
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              dateStr, 
+                              style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.9), fontWeight: FontWeight.w500)
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 10),
-                      Text("Merhaba, $displayName! 👋", style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
-                      const SizedBox(height: 5),
-                      Text(dateStr, style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.w500)),
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())),
+                        child: Container(
+                          padding: const EdgeInsets.all(8), 
+                          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle), 
+                          child: const Icon(Icons.settings, color: Colors.white, size: 22)
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -295,13 +420,47 @@ class _HomeScreenState extends State<HomeScreen> {
                   bottom: 0, left: 24, right: 24,
                   child: Container(
                     height: 100,
-                    decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(20), border: isDarkMode ? Border.all(color: Colors.white10, width: 1) : null, boxShadow: isDarkMode ? [] : AppStyles.softShadow),
+                    decoration: BoxDecoration(
+                      color: cardColor, 
+                      borderRadius: BorderRadius.circular(20), 
+                      border: isDarkMode ? Border.all(color: Colors.white10, width: 1) : null, 
+                      boxShadow: isDarkMode ? [] : AppStyles.softShadow
+                    ),
                     padding: const EdgeInsets.all(20),
                     child: Row(
                       children: [
-                        Stack(alignment: Alignment.center, children: [SizedBox(width: 60, height: 60, child: CircularProgressIndicator(value: progress, strokeWidth: 8, backgroundColor: isDarkMode ? Colors.white10 : AppColors.backgroundLight, valueColor: AlwaysStoppedAnimation<Color>(themeProvider.secondaryColor))), Text("${(progress * 100).toInt()}%", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor))]),
+                        Stack(
+                          alignment: Alignment.center, 
+                          children: [
+                            SizedBox(
+                              width: 60, height: 60, 
+                              child: CircularProgressIndicator(
+                                value: progress, 
+                                strokeWidth: 8, 
+                                backgroundColor: isDarkMode ? Colors.white10 : AppColors.backgroundLight, 
+                                valueColor: AlwaysStoppedAnimation<Color>(themeProvider.secondaryColor)
+                              )
+                            ), 
+                            Text("${(progress * 100).toInt()}%", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor))
+                          ]
+                        ),
                         const SizedBox(width: 20),
-                        Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [Text(_selectedProjectId != null && allProjects.isNotEmpty ? allProjects.firstWhere((p) => p.id == _selectedProjectId, orElse: () => Project(title: 'Yükleniyor', colorValue: 0)).title : "Proje Seçin", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)), const SizedBox(height: 4), Text("$completedTasks / $totalTasks Görev Tamamlandı", style: TextStyle(color: subTextColor, fontSize: 13))]),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start, 
+                            mainAxisAlignment: MainAxisAlignment.center, 
+                            children: [
+                              Text(
+                                _selectedProjectId != null && allProjects.isNotEmpty ? allProjects.firstWhere((p) => p.id == _selectedProjectId, orElse: () => Project(title: 'Yükleniyor', colorValue: 0)).title : "Proje Seçin", 
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ), 
+                              const SizedBox(height: 4), 
+                              Text("$completedTasks / $totalTasks Görev Tamamlandı", style: TextStyle(color: subTextColor, fontSize: 13))
+                            ]
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -309,8 +468,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 20),
+          
+          const SizedBox(height: 15),
 
+          // --- PROJE LİSTESİ ---
           SizedBox(
             height: 50,
             child: ListView(
@@ -336,24 +497,64 @@ class _HomeScreenState extends State<HomeScreen> {
                   return GestureDetector(
                     onTap: () { setState(() => _selectedProjectId = project.id); HapticFeedback.selectionClick(); }, 
                     onLongPress: () { 
-                      if (taskProvider.isAdmin) {
-                        showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Projeyi Sil"), content: const Text("Bu proje ve içindeki görevler silinsin mi?"), actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("İptal")), TextButton(onPressed: () async { await taskProvider.deleteProject(project.id!); Navigator.pop(ctx); setState(() => _selectedProjectId = null); }, child: const Text("Sil", style: TextStyle(color: Colors.red)))])); 
+                      if (!taskProvider.isAdmin) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sadece yöneticiler proje silebilir.")));
+                        return;
+                      }
+
+                      // Diğer projeleri ve görev sayısını bul
+                      final otherProjects = allProjects.where((p) => p.id != project.id).toList();
+                      final projectTasksCount = allTasks.where((t) => t.projectId == project.id).length;
+
+                      // --- SİLME MANTIĞI ---
+                      
+                      // 1. Birden fazla proje var VE silinecek proje dolu -> AKTAR SEÇENEĞİ
+                      if (otherProjects.isNotEmpty && projectTasksCount > 0) {
+                        _showTransferDialog(project, otherProjects, taskProvider);
+                      } 
+                      // 2. Tek proje kaldıysa VEYA içi boşsa -> DİREKT SİLME (Uyarı ile)
+                      else {
+                        _confirmDelete(project, taskProvider, projectTasksCount, allTasks, themeProvider);
                       }
                     }, 
-                    child: AnimatedContainer(duration: const Duration(milliseconds: 200), margin: const EdgeInsets.only(right: 12), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8), decoration: BoxDecoration(color: isSelected ? Color(project.colorValue) : cardColor, borderRadius: BorderRadius.circular(20), border: Border.all(color: isSelected ? Colors.transparent : (isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300)), boxShadow: isSelected ? [BoxShadow(color: Color(project.colorValue).withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))] : []), alignment: Alignment.center, child: Text(project.title, style: TextStyle(color: isSelected ? Colors.white : (isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight), fontWeight: FontWeight.bold)))
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200), 
+                      margin: const EdgeInsets.only(right: 12), 
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8), 
+                      decoration: BoxDecoration(
+                        color: isSelected ? Color(project.colorValue) : cardColor, 
+                        borderRadius: BorderRadius.circular(20), 
+                        border: Border.all(color: isSelected ? Colors.transparent : (isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300)), 
+                        boxShadow: isSelected ? [BoxShadow(color: Color(project.colorValue).withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))] : []
+                      ), 
+                      alignment: Alignment.center, 
+                      child: Text(project.title, style: TextStyle(color: isSelected ? Colors.white : (isDarkMode ? AppColors.textSecondaryDark : AppColors.textSecondaryLight), fontWeight: FontWeight.bold))
+                    )
                   ); 
                 })
               ]
             )
           ),
 
+          // --- ARAMA VE FİLTRE ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: Column(
               children: [
                 Row(
                   children: [
-                    Expanded(child: Container(height: 45, decoration: BoxDecoration(color: isDarkMode ? Colors.grey.shade900 : Colors.white, borderRadius: BorderRadius.circular(15), border: Border.all(color: isDarkMode ? Colors.transparent : Colors.grey.shade300)), child: TextField(controller: _searchController, onChanged: (val) => setState(() => _searchQuery = val), style: TextStyle(color: textColor), decoration: InputDecoration(hintText: "Görev Ara...", hintStyle: TextStyle(color: subTextColor), prefixIcon: Icon(Icons.search, color: subTextColor), border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(vertical: 10))))),
+                    Expanded(
+                      child: Container(
+                        height: 45, 
+                        decoration: BoxDecoration(color: isDarkMode ? Colors.grey.shade900 : Colors.white, borderRadius: BorderRadius.circular(15), border: Border.all(color: isDarkMode ? Colors.transparent : Colors.grey.shade300)), 
+                        child: TextField(
+                          controller: _searchController, 
+                          onChanged: (val) => setState(() => _searchQuery = val), 
+                          style: TextStyle(color: textColor), 
+                          decoration: InputDecoration(hintText: "Görev Ara...", hintStyle: TextStyle(color: subTextColor), prefixIcon: Icon(Icons.search, color: subTextColor), border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(vertical: 10))
+                        )
+                      )
+                    ),
                     const SizedBox(width: 10),
                     GestureDetector(onTap: () => _showSortOptions(themeProvider), child: Container(height: 45, width: 45, decoration: BoxDecoration(color: themeProvider.secondaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(15)), child: Icon(Icons.sort, color: themeProvider.secondaryColor))),
                   ],
@@ -361,6 +562,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 
                 const SizedBox(height: 12),
                 
+                // FİLTRE BUTONLARI
                 Container(
                   height: 40,
                   padding: const EdgeInsets.all(4),
@@ -379,6 +581,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
+          // --- GÖREV LİSTESİ ---
           Expanded(
             child: taskProvider.isLoading
                 ? const Center(child: CircularProgressIndicator())

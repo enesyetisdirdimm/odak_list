@@ -18,9 +18,10 @@ import 'package:odak_list/screens/login_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:odak_list/screens/profile_select_screen.dart';
-import 'package:odak_list/services/purchase_api.dart';
-import 'package:odak_list/screens/verify_email_screen.dart';
+import 'package:odak_list/services/purchase_api.dart'; // Satın Alma Servisi
+import 'package:odak_list/screens/verify_email_screen.dart'; // Mail Doğrulama
 
+// Yerel Zaman Dilimi Ayarı
 Future<void> _configureLocalTimeZone() async {
   tz.initializeTimeZones();
   String timeZoneName;
@@ -39,18 +40,22 @@ Future<void> _configureLocalTimeZone() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // 1. Firebase Başlat
   try {
     await Firebase.initializeApp();
+    // 2. Satın Alma Servisini Başlat
     await PurchaseApi.init();
   } catch (e) {
-    print("Firebase başlatma hatası: $e");
+    print("Başlatma hatası: $e");
   }
   
   final dbService = DatabaseService();
   
+  // 3. Onboarding Kontrolü
   final prefs = await SharedPreferences.getInstance();
   final bool seenOnboarding = prefs.getBool('seenOnboarding') ?? false;
 
+  // 4. Bildirim ve Zaman Dilimi Ayarları
   try {
     await _configureLocalTimeZone();
     await NotificationService().init();
@@ -67,7 +72,7 @@ void main() async {
       child: MyApp(
         dbService: dbService, 
         startScreen: seenOnboarding 
-            ? const ProfileSelectScreen() 
+            ? const AuthWrapper() // Akıllı Giriş Kontrolü
             : OnboardingScreen(dbService: dbService),
       ),
     ),
@@ -86,8 +91,9 @@ class MyApp extends StatelessWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'OdakList',
+      title: 'CoFocus', // Uygulama Adı
       
+      // --- AÇIK TEMA ---
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
@@ -104,6 +110,7 @@ class MyApp extends StatelessWidget {
         ),
       ),
 
+      // --- KOYU TEMA ---
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -123,37 +130,67 @@ class MyApp extends StatelessWidget {
 
       themeMode: themeProvider.themeMode,
       
-      // YENİ GİRİŞ VE PROFİL KONTROLÜ
-      home: StreamBuilder<User?>(
-        stream: AuthService().authStateChanges,
-        builder: (context, snapshot) {
-          // 1. Giriş Yoksa -> Login
-          if (!snapshot.hasData) {
-            if (startScreen is OnboardingScreen) return startScreen;
-            return const LoginScreen();
-          }
+      // Başlangıç Ekranı (Onboarding veya AuthWrapper)
+      home: startScreen, 
+    );
+  }
+}
 
-          // 2. Giriş Var ama MAIL DOĞRULANMAMIŞSA -> Verify Screen
-          // Not: emailVerified bazen cache'den false gelebilir, reload yapmak gerekebilir
-          // ama güvenlik için burada bloklamak en iyisidir.
-          if (!snapshot.data!.emailVerified) {
-             return const VerifyEmailScreen();
-          }
+// --- AKILLI GİRİŞ VE YÖNLENDİRME KONTROLCÜSÜ ---
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
 
-          // 3. Giriş Var ve Mail Doğrulanmışsa -> PROFİL DURUMUNA BAK
-          return Consumer<TaskProvider>(
-            builder: (context, taskProvider, child) {
-              if (taskProvider.isLoading) {
-                return const Scaffold(body: Center(child: CircularProgressIndicator()));
-              }
-              if (taskProvider.currentMember != null) {
-                return NavigationScreen(dbService: dbService);
-              }
-              return const ProfileSelectScreen();
-            },
-          );
-        },
-      ),
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: AuthService().authStateChanges,
+      builder: (context, snapshot) {
+        // 1. Kullanıcı Girişi Yoksa -> Login Ekranı
+        if (!snapshot.hasData) {
+          return const LoginScreen();
+        }
+
+        // 2. Kullanıcı Girişi Varsa -> Mail Onayını ve Profili Kontrol Et
+        // FutureBuilder kullanarak 'reload()' işleminin bitmesini bekliyoruz.
+        return FutureBuilder<void>(
+          future: snapshot.data!.reload(), // Kullanıcı bilgisini tazele
+          builder: (context, asyncSnapshot) {
+            // Not: reload() void döner, veriyi FirebaseAuth.instance'dan alırız.
+            
+            final user = FirebaseAuth.instance.currentUser;
+            
+            // A. Mail Onaylanmamışsa -> Doğrulama Ekranı
+            if (user != null && !user.emailVerified) {
+              return const VerifyEmailScreen();
+            }
+
+            // B. Mail Onaylıysa -> Profil Kontrolü (Provider)
+            return Consumer<TaskProvider>(
+              builder: (context, taskProvider, child) {
+                // TaskProvider verileri yüklüyorsa (Profil kontrolü dahil)
+                if (taskProvider.isLoading) {
+                  return const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  );
+                }
+
+                // Hafızada kayıtlı bir profil başarıyla seçildiyse -> Ana Ekran
+                if (taskProvider.currentMember != null) {
+                  return NavigationScreen(dbService: DatabaseService());
+                }
+
+                // Kayıtlı profil yoksa veya silinmişse -> Profil Seçimi
+                return const ProfileSelectScreen();
+              },
+            );
+          },
+        );
+      },
     );
   }
 }

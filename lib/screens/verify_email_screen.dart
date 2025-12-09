@@ -1,8 +1,10 @@
 // Dosya: lib/screens/verify_email_screen.dart
 
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart'; // Eklendi
 import 'package:flutter/material.dart';
 import 'package:odak_list/screens/profile_select_screen.dart';
+import 'package:odak_list/screens/login_screen.dart'; 
 import 'package:odak_list/services/auth_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
 
@@ -22,15 +24,39 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // Ekran açılır açılmaz sunucudan son durumu kontrol et
+    _checkStatusOnLoad();
+  }
 
-    // 1. Durumu kontrol et
-    isEmailVerified = _authService.currentUser?.emailVerified ?? false;
+  // YENİ: Açılışta sunucuyu zorla kontrol et
+  Future<void> _checkStatusOnLoad() async {
+    // 1. Kullanıcıyı Firebase'den yenile (Reload)
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await user.reload(); 
+      // Reload sonrası değişkeni güncelle
+      setState(() {
+        isEmailVerified = FirebaseAuth.instance.currentUser?.emailVerified ?? false;
+      });
+    }
 
-    if (!isEmailVerified) {
-      // 2. Mail gönder (Eğer daha önce gönderilmediyse)
-      _sendVerificationEmail();
-
-      // 3. Her 3 saniyede bir kontrol et (Kullanıcı linke tıkladı mı?)
+    // 2. Eğer zaten doğrulanmışsa içeri al
+    if (isEmailVerified) {
+      if (mounted) {
+        Navigator.pushReplacement(
+          context, 
+          MaterialPageRoute(builder: (context) => const ProfileSelectScreen())
+        );
+      }
+    } else {
+      // 3. Gerçekten doğrulanmamışsa o zaman mail gönder (veya gönderme butonunu aktif et)
+      // Kullanıcıyı spamlamamak için direkt göndermek yerine timer başlatalım
+      // ve kullanıcı isterse butona basıp göndersin.
+      
+      // _sendVerificationEmail(); // Otomatik göndermeyi kapattık, kullanıcı isterse basar.
+      
+      // Periyodik kontrolü başlat
       timer = Timer.periodic(
         const Duration(seconds: 3),
         (_) => _checkEmailVerified(),
@@ -45,13 +71,11 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
   }
 
   Future<void> _checkEmailVerified() async {
-    // Firebase kullanıcısını yenile
     bool verified = await _authService.checkEmailVerified();
     
     if (verified) {
       timer?.cancel();
       if (mounted) {
-        // Doğrulandıysa içeri al
         Navigator.pushReplacement(
           context, 
           MaterialPageRoute(builder: (context) => const ProfileSelectScreen())
@@ -64,9 +88,14 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     try {
       await _authService.sendEmailVerification();
       setState(() => canResendEmail = false);
-      // 30 saniye sonra tekrar gönderme hakkı ver
       await Future.delayed(const Duration(seconds: 30));
       if (mounted) setState(() => canResendEmail = true);
+      
+      if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Doğrulama maili tekrar gönderildi."))
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -78,7 +107,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Eğer zaten doğrulanmışsa bu ekranı gösterme (Güvenlik)
+    // Bu satır güvenlik için kalabilir
     if (isEmailVerified) return const ProfileSelectScreen();
 
     return Scaffold(
@@ -87,6 +116,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
         title: const Text("Mail Doğrulama"),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        automaticallyImplyLeading: false, 
       ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -102,17 +132,17 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              "${_authService.currentUser?.email} adresine bir doğrulama bağlantısı gönderdik.\n\nLütfen linke tıkla ve hesabını onayla.",
+              "${_authService.currentUser?.email} adresinin onaylanmasını bekliyoruz.\n\nEğer onayladıysan sistem seni otomatik içeri alacaktır.",
               style: const TextStyle(fontSize: 16, color: Colors.grey),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 40),
             
-            // Tekrar Gönder Butonu
             ElevatedButton.icon(
-              onPressed: canResendEmail ? _sendVerificationEmail : null,
+              // İlk başta buton aktif olsun
+              onPressed: canResendEmail || timer != null ? _sendVerificationEmail : null,
               icon: const Icon(Icons.email),
-              label: const Text("Tekrar Mail Gönder"),
+              label: const Text("Doğrulama Mailini Tekrar Gönder"),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.priorityMedium,
                 foregroundColor: Colors.white,
@@ -121,9 +151,17 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
             ),
             const SizedBox(height: 16),
             
-            // Vazgeç Butonu
             TextButton(
-              onPressed: () => _authService.signOut(), // Çıkış yapıp başa dönsün
+              onPressed: () async {
+                await _authService.signOut(); 
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context, 
+                    MaterialPageRoute(builder: (context) => const LoginScreen()),
+                    (route) => false
+                  );
+                }
+              }, 
               child: const Text("Vazgeç / Giriş Ekranına Dön"),
             ),
           ],

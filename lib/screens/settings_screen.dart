@@ -2,15 +2,15 @@
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:odak_list/screens/premium_screen.dart';
+import 'package:odak_list/screens/premium_screen.dart'; 
 import 'package:odak_list/screens/team_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
-import 'package:odak_list/services/database_service.dart';
+import 'package:odak_list/services/database_service.dart'; 
 import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/screens/profile_select_screen.dart';
-import 'package:odak_list/screens/login_screen.dart'; 
+import 'package:odak_list/screens/login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -39,23 +39,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  // --- İSİM DEĞİŞTİRME DİYALOĞU (DÜZELTİLDİ) ---
+  // --- İSİM DEĞİŞTİRME DİYALOĞU ---
   void _showEditNameDialog() {
     final taskProvider = Provider.of<TaskProvider>(context, listen: false);
     final currentMember = taskProvider.currentMember;
     
-    // Profil ismini varsayılan olarak al
-    // (Artık Auth ismine fallback yapmıyoruz, profil ismi neyse o)
-    final initialName = currentMember?.name ?? "İsimsiz";
+    final initialName = currentMember?.name ?? _currentUser?.displayName ?? "";
     final controller = TextEditingController(text: initialName);
 
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Profil İsmini Değiştir"),
+        title: const Text("İsim Değiştir"),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(labelText: "Yeni İsim", border: OutlineInputBorder()),
+          decoration: const InputDecoration(labelText: "Yeni Ad Soyad", border: OutlineInputBorder()),
+          maxLength: 15, // Giriş yaparken de sınır koyalım
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
@@ -64,34 +63,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (controller.text.trim().isEmpty) return;
 
               final newName = controller.text.trim();
-              
-              // Diyaloğu kapat
               Navigator.pop(ctx);
 
               try {
-                // DÜZELTME: Auth servisindeki genel ismi GÜNCELLEMİYORUZ.
-                // await _authService.updateName(newName); <--- BU SATIR SİLİNDİ
-                // Sadece veritabanındaki bu profilin ismini güncelliyoruz.
+                // 1. Auth İsmini Güncelle
+                await _authService.updateName(newName);
 
+                // 2. Profil İsmini Güncelle
                 if (currentMember != null) {
                   await _dbService.updateTeamMemberInfo(
                     currentMember.id, 
                     newName, 
                     currentMember.profilePin
                   );
-                  
-                  // Yerel (Provider) state'i de güncelle ki anında görünsün
-                  currentMember.name = newName;
-                  // Provider'ı uyararak ekranı yenilemesini sağla
-                  // (TaskProvider içindeki notifyListeners tetiklenmeli, 
-                  // ama currentMember referans olduğu için bazen otomatik algılanır)
-                  taskProvider.selectMember(currentMember); // Bu tetiklemeyi sağlar
+                  currentMember.name = newName; 
+                  taskProvider.selectMember(currentMember);
                 }
-                
+
                 if (mounted) {
                   _refreshUser();
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Profil ismi güncellendi!"))
+                    const SnackBar(content: Text("İsim başarıyla güncellendi!"))
                   );
                 }
               } catch (e) {
@@ -145,7 +137,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 return;
               }
               
-              Navigator.pop(ctx); 
+              Navigator.pop(ctx);
 
               try {
                 await _authService.changePassword(oldPassController.text, newPassController.text);
@@ -207,8 +199,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final currentMember = taskProvider.currentMember;
     final isAdmin = taskProvider.isAdmin; 
 
-    // GÖSTERİM: Sadece profil ismini göster. Auth ismine karışma.
-    final userName = currentMember?.name ?? "Misafir";
+    // İsim ve Rol Bilgileri
+    final String rawName = currentMember?.name ?? _currentUser?.displayName ?? "Misafir";
+    
+    // --- İSİM KISALTMA MANTIĞI (15 Karakter Sınırı) ---
+    final String displayUserName = rawName.length > 15 
+        ? "${rawName.substring(0, 15)}..." 
+        : rawName;
+    // --------------------------------------------------
+
     final userRole = isAdmin ? "Yönetici" : "Editör";
     final userEmail = _currentUser?.email ?? "";
 
@@ -223,7 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // --- PROFİL KARTI ---
+          // --- PROFİL KARTI ---W
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -241,7 +240,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: CircleAvatar(
                         radius: 30,
                         backgroundColor: Colors.grey.shade200,
-                        child: Text(userName.isNotEmpty ? userName[0].toUpperCase() : "K", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black54)),
+                        child: Text(displayUserName.isNotEmpty ? displayUserName[0].toUpperCase() : "K", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black54)),
                       ),
                     ),
                     const SizedBox(width: 15),
@@ -251,7 +250,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         children: [
                           Row(
                             children: [
-                              Flexible(child: Text(userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))),
+                              // Kısaltılmış ismi burada kullanıyoruz
+                              Flexible(child: Text(displayUserName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))),
+                              
                               IconButton(
                                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
                                 onPressed: _showEditNameDialog, 
