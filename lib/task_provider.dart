@@ -3,6 +3,7 @@
 import 'dart:async'; 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -322,6 +323,7 @@ class TaskProvider extends ChangeNotifier {
 
   // --- WIDGET GÜNCELLEME ---
   Future<void> _updateHomeWidget() async {
+    if (kIsWeb) return;
     try {
       DateTime now = DateTime.now();
       int total = _tasks.length;
@@ -337,20 +339,26 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // --- GÖREV İŞLEMLERİ (CRUD) ---
-  
   Future<void> addTask(Task task) async {
-    // DÜZELTME: creatorId, Auth UID olmalı ki Cloud Function doğru klasöre baksın.
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      task.creatorId = user.uid;
+    // ESKİSİ: task.creatorId = user.uid; (Bunu değiştiriyoruz)
+    
+    // YENİSİ: Görevi oluşturan kişi, o anki seçili Profil (Member) ID'sidir.
+    // Cloud/Storage işlemleri için 'ownerId' zaten DatabaseService'de Auth UID olarak ayarlanıyor.
+    if (_currentMember != null) {
+      task.creatorId = _currentMember!.id;
+    } else {
+      // Eğer profil seçili değilse (ki olmalı), yedek olarak Auth UID koy.
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) task.creatorId = user.uid;
     }
     
-    // Oluşturulma zamanını ekle
+    // Oluşturulma zamanı
     task.createdAt = DateTime.now();
     
+    // Veritabanına kaydet (ownerId burada otomatik ekleniyor)
     Task createdTask = await _dbService.createTask(task);
     
-    // Log kaydında isim görünmesi için member ismini kullanabiliriz
+    // Log ekle
     if (_currentMember != null) {
       await _dbService.addActivityLog(
         createdTask.id!, 
@@ -359,7 +367,6 @@ class TaskProvider extends ChangeNotifier {
       );
     }
   }
-
   Future<void> updateTask(Task task) async {
     await _dbService.updateTask(task);
   }
@@ -369,9 +376,18 @@ class TaskProvider extends ChangeNotifier {
     await _notificationService.cancelNotification(id.hashCode);
   }
 
-  bool canCompleteTask(Task task) {
+bool canCompleteTask(Task task) {
+    // 1. Admin ise her şeyi yapar.
     if (isAdmin) return true;
+
+    // 2. YENİ KURAL: Görevi oluşturan kişi (Creator) de görevi tamamlayabilir/değiştirebilir.
+    // (Örn: Enes görevi Admin'e atadı ama kendisi de bitirebilsin)
+    if (task.creatorId == _currentMember?.id) return true;
+
+    // 3. Görev havuzdaysa (sahipsizse) herkes yapabilir.
     if (task.assignedMemberId == null) return true;
+
+    // 4. Görev bana atanmışsa yapabilirim.
     return task.assignedMemberId == _currentMember?.id;
   }
 
@@ -430,6 +446,13 @@ class TaskProvider extends ChangeNotifier {
       // Normal Görev
       bool isNowDone = !task.isDone;
       task.isDone = !task.isDone;
+
+    if (isNowDone) {
+      task.completedBy = _currentMember?.name; 
+    } else {
+      task.completedBy = null;
+    }
+
       await updateTask(task);
 
       if (task.id != null && _currentMember != null) {
@@ -499,7 +522,7 @@ class TaskProvider extends ChangeNotifier {
     
     // Not: Stream dinlediği için listeler otomatik güncellenir
   }
-  
+
   Future<void> deleteProjectWithTransfer(String projectId, String targetProjectId) async {
     // 1. Görevleri yeni projeye taşı
     await _dbService.moveTasksToProject(projectId, targetProjectId);

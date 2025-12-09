@@ -104,24 +104,19 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       if (isLogin) {
         // --- GİRİŞ YAP ---
-        // AuthService'deki signIn, kullanıcı yoksa hata fırlatacak.
         User? user = await _authService.signIn(email, password);
         
         if (user != null) {
-          // Cache sorununu önlemek için sunucudan son durumu çekiyoruz
           await user.reload(); 
           User? refreshedUser = FirebaseAuth.instance.currentUser;
 
           if (mounted) {
-             // 1. Mail Onaylı mı?
              if (refreshedUser != null && refreshedUser.emailVerified) {
-               // ONAYLI -> Profil Seçimine Git
                Navigator.pushReplacement(
                  context,
                  MaterialPageRoute(builder: (context) => const ProfileSelectScreen()),
                );
              } else {
-               // ONAYSIZ -> Doğrulama Ekranına Git
                ScaffoldMessenger.of(context).showSnackBar(
                  const SnackBar(content: Text("Lütfen önce mail adresinizi doğrulayın."))
                );
@@ -137,13 +132,9 @@ class _LoginScreenState extends State<LoginScreen> {
         User? user = await _authService.signUp(email, password, name);
         
         if (user != null) {
-          // 1. Hemen veritabanı profilini oluştur (Profil ekranı boş gelmesin diye)
           await _dbService.createInitialAdminProfile(name, pin);
-          
-          // 2. Doğrulama mailini gönder
           await _authService.sendEmailVerification();
           
-          // 3. Doğrulama ekranına yönlendir
           if (mounted) {
              Navigator.pushReplacement(
                context,
@@ -153,15 +144,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } catch (e) {
-      // HATA YÖNETİMİ
       if (mounted) {
         String errorMessage = e.toString().replaceAll("Exception:", "").trim();
-        
-        // Kullanıcı dostu hata mesajı
         if (errorMessage.contains("user-not-found") || errorMessage.contains("Kullanıcı bulunamadı")) {
           errorMessage = "Böyle bir mail adresi kayıtlı değil. Lütfen önce 'Kayıt Ol' butonuna basın.";
         }
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMessage),
@@ -182,103 +169,105 @@ class _LoginScreenState extends State<LoginScreen> {
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.check_circle, size: 100, color: AppColors.priorityMedium),
-              const SizedBox(height: 20),
-              Text(
-                isLogin ? "Tekrar Hoşgeldin!" : "Hesap Oluştur",
-                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 40),
-
-              // Kayıt Ol Formu (İsim ve Pin sadece kayıt olurken görünür)
-              if (!isLogin) ...[
-                TextField(
-                  controller: _nameController,
-                  decoration: InputDecoration(
-                    labelText: "Ad Soyad (Admin)",
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    prefixIcon: const Icon(Icons.person_outline),
+          child: Center( // WEB UYUMLULUĞU İÇİN MERKEZLEME
+            child: ConstrainedBox( // GENİŞLİK SINIRLAMASI
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.check_circle, size: 100, color: AppColors.priorityMedium),
+                  const SizedBox(height: 20),
+                  Text(
+                    isLogin ? "Tekrar Hoşgeldin!" : "Hesap Oluştur",
+                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _pinController,
-                  decoration: InputDecoration(
-                    labelText: "Profil Pini (4 Hane)",
-                    hintText: "Örn: 1234",
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    prefixIcon: const Icon(Icons.lock_clock_outlined),
-                  ),
-                  keyboardType: TextInputType.number,
-                  obscureText: true,
-                  maxLength: 4,
-                ),
-                const SizedBox(height: 16),
-              ],
+                  const SizedBox(height: 40),
 
-              TextField(
-                controller: _emailController,
-                decoration: InputDecoration(
-                  labelText: "Email",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.email_outlined),
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 16),
-
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: "Şifre",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.lock_outline),
-                ),
-              ),
-              
-              // --- ŞİFREMİ UNUTTUM BUTONU (Sadece Giriş Ekranında) ---
-              if (isLogin)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: _showForgotPasswordDialog,
-                    child: const Text("Şifremi Unuttum?", style: TextStyle(color: Colors.grey)),
-                  ),
-                )
-              else
-                const SizedBox(height: 24),
-
-              // Buton
-              isLoading 
-                ? const CircularProgressIndicator()
-                : SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: _submit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.priorityMedium,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  if (!isLogin) ...[
+                    TextField(
+                      controller: _nameController,
+                      decoration: InputDecoration(
+                        labelText: "Ad Soyad (Admin)",
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(Icons.person_outline),
                       ),
-                      child: Text(isLogin ? "GİRİŞ YAP" : "KAYIT OL", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _pinController,
+                      decoration: InputDecoration(
+                        labelText: "Profil Pini (4 Hane)",
+                        hintText: "Örn: 1234",
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(Icons.lock_clock_outlined),
+                      ),
+                      keyboardType: TextInputType.number,
+                      obscureText: true,
+                      maxLength: 4,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  TextField(
+                    controller: _emailController,
+                    decoration: InputDecoration(
+                      labelText: "Email",
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: const Icon(Icons.email_outlined),
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 16),
+
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: "Şifre",
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: const Icon(Icons.lock_outline),
                     ),
                   ),
-              
-              const SizedBox(height: 20),
+                  
+                  if (isLogin)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _showForgotPasswordDialog,
+                        child: const Text("Şifremi Unuttum?", style: TextStyle(color: Colors.grey)),
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 24),
 
-              TextButton(
-                onPressed: () => setState(() => isLogin = !isLogin),
-                child: Text(
-                  isLogin ? "Hesabın yok mu? Kayıt Ol" : "Zaten hesabın var mı? Giriş Yap",
-                  style: TextStyle(color: Colors.grey.shade700),
-                ),
-              )
-            ],
+                  isLoading 
+                    ? const CircularProgressIndicator()
+                    : SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: _submit,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.priorityMedium,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: Text(isLogin ? "GİRİŞ YAP" : "KAYIT OL", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                  
+                  const SizedBox(height: 20),
+
+                  TextButton(
+                    onPressed: () => setState(() => isLogin = !isLogin),
+                    child: Text(
+                      isLogin ? "Hesabın yok mu? Kayıt Ol" : "Zaten hesabın var mı? Giriş Yap",
+                      style: TextStyle(color: Colors.grey.shade700),
+                    ),
+                  )
+                ],
+              ),
+            ),
           ),
         ),
       ),

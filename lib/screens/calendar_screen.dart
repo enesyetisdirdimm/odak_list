@@ -6,6 +6,7 @@ import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/widgets/task_card.dart';
 import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:odak_list/theme_provider.dart'; // EKLENDİ
 
 class CalendarScreen extends StatefulWidget {
   final DatabaseService dbService;
@@ -43,89 +44,124 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Consumer<TaskProvider>(
       builder: (context, taskProvider, child) {
         final allTasks = taskProvider.tasks;
-        
         final selectedEvents = _getTasksForDay(_selectedDay ?? _focusedDay, allTasks);
 
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          // --- BURASI DÜZELTİLDİ: SafeArea eklendi ---
-          body: SafeArea( 
-            child: Column(
-              children: [
-                TableCalendar<Task>(
-                  firstDay: DateTime.utc(2020, 10, 16),
-                  lastDay: DateTime.utc(2030, 3, 14),
-                  focusedDay: _focusedDay,
-                  calendarFormat: _calendarFormat,
-                  
-                  eventLoader: (day) => _getTasksForDay(day, allTasks),
-                  
-                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                  onDaySelected: (selectedDay, focusedDay) {
-                    setState(() {
-                      _selectedDay = selectedDay;
-                      _focusedDay = focusedDay;
-                    });
-                  },
-                  onFormatChanged: (format) {
-                    if (_calendarFormat != format) {
-                      setState(() => _calendarFormat = format);
-                    }
-                  },
-                  onPageChanged: (focusedDay) {
-                    _focusedDay = focusedDay;
-                  },
-                  calendarStyle: CalendarStyle(
-                    markerDecoration: BoxDecoration(color: Theme.of(context).primaryColor, shape: BoxShape.circle),
-                    todayDecoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.5), shape: BoxShape.circle),
-                    selectedDecoration: BoxDecoration(color: Theme.of(context).primaryColor, shape: BoxShape.circle),
-                  ),
-                ),
-                const SizedBox(height: 8.0),
-                
-                Expanded(
-                  child: selectedEvents.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.event_busy, size: 50, color: Colors.grey.withOpacity(0.5)),
-                              const SizedBox(height: 10),
-                              const Text("Bugün için planlanmış görev yok.", style: TextStyle(color: Colors.grey)),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-                          itemCount: selectedEvents.length,
-                          itemBuilder: (context, index) {
-                            final task = selectedEvents[index];
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 12.0),
-                              child: TaskCard(
-                                task: task,
-                                categories: const {}, 
-                                onTap: () => _navigateToDetail(task),
-                                onToggleDone: () {
-                                  // AYNI KONTROL BURADA DA VAR
-                                  if (taskProvider.canCompleteTask(task)) {
-                                    taskProvider.toggleTaskStatus(task);
-                                  } else {
-                                     String ownerName = taskProvider.getMemberName(task.assignedMemberId) ?? "Başkası";
-                                     ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text("Bu görev $ownerName kişisine ait."), backgroundColor: Colors.red)
-                                     );
-                                  }
+          body: Center( // WEB İÇİN ORTALAMA
+            child: ConstrainedBox( // GENİŞLİK SINIRLAMASI
+              constraints: const BoxConstraints(maxWidth: 1000),
+              child: SafeArea( 
+                child: Column(
+                  children: [
+                    // --- TAKVİM KISMI (KART) ---
+                    Container(
+                      margin: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          if (!isDarkMode)
+                            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+                        ]
+                      ),
+                      child: TableCalendar<Task>(
+                        firstDay: DateTime.utc(2020, 10, 16),
+                        lastDay: DateTime.utc(2030, 3, 14),
+                        focusedDay: _focusedDay,
+                        calendarFormat: _calendarFormat,
+                        
+                        eventLoader: (day) => _getTasksForDay(day, allTasks),
+                        
+                        selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                        onDaySelected: (selectedDay, focusedDay) {
+                          setState(() {
+                            _selectedDay = selectedDay;
+                            _focusedDay = focusedDay;
+                          });
+                        },
+                        onFormatChanged: (format) {
+                          if (_calendarFormat != format) {
+                            setState(() => _calendarFormat = format);
+                          }
+                        },
+                        onPageChanged: (focusedDay) {
+                          _focusedDay = focusedDay;
+                        },
+                        calendarStyle: CalendarStyle(
+                          markerDecoration: BoxDecoration(color: themeProvider.primaryColor, shape: BoxShape.circle),
+                          todayDecoration: BoxDecoration(color: themeProvider.secondaryColor.withOpacity(0.5), shape: BoxShape.circle),
+                          selectedDecoration: BoxDecoration(color: themeProvider.secondaryColor, shape: BoxShape.circle),
+                        ),
+                        headerStyle: const HeaderStyle(
+                          formatButtonVisible: false,
+                          titleCentered: true,
+                        ),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 8.0),
+                    
+                    // --- LİSTE KISMI (BEYAZ ARKA PLAN) ---
+                    Expanded(
+                      child: Container(
+                        width: double.infinity,
+                        // BURASI: Takvimin altındaki listenin arka planını beyaz yapıyoruz
+                        decoration: BoxDecoration(
+                          color: isDarkMode ? Colors.black26 : Colors.white, 
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+                          boxShadow: [
+                            if (!isDarkMode)
+                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))
+                          ]
+                        ),
+                        child: selectedEvents.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.event_note, size: 60, color: Colors.grey.withOpacity(0.3)),
+                                    const SizedBox(height: 10),
+                                    Text("Bugün için planlanmış görev yok.", style: TextStyle(color: Colors.grey.shade500, fontSize: 16)),
+                                  ],
+                                ),
+                              )
+                            : ListView.builder(
+                                padding: const EdgeInsets.all(20),
+                                itemCount: selectedEvents.length,
+                                itemBuilder: (context, index) {
+                                  final task = selectedEvents[index];
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 12.0),
+                                    child: TaskCard(
+                                      task: task,
+                                      categories: const {}, 
+                                      onTap: () => _navigateToDetail(task),
+                                      onToggleDone: () {
+                                        if (taskProvider.canCompleteTask(task)) {
+                                          taskProvider.toggleTaskStatus(task);
+                                        } else {
+                                           String ownerName = taskProvider.getMemberName(task.assignedMemberId) ?? "Başkası";
+                                           ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text("Bu görev $ownerName kişisine ait."), backgroundColor: Colors.red)
+                                           );
+                                        }
+                                      },
+                                    ),
+                                  );
                                 },
                               ),
-                            );
-                          },
-                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         );

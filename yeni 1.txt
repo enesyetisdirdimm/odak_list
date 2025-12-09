@@ -1,0 +1,33 @@
+keytool -genkey -v -keystore c:\Users\Enes\upload-keystore.jks -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+
+. Şifre Belirleme:
+
+Soru: Enter keystore password: 
+Eyet1356?
+
+Soru: Re-enter new password:
+Eyet1356?
+
+2. What is your first and last name?
+ENES YETİŞDİRDİM
+
+3. What is the name of your organizational unit?
+MrEnes
+
+4. What is the name of your organization?
+Kişisel
+
+5. What is the name of your City or Locality?
+Istanbul
+
+6. What is the name of your State or Province?
+Istanbul
+
+7. What is the two-letter country code for this unit?
+TR
+
+8. Onaylama (En Önemli Kısım):
+yes
+
+9. Enter key password for <upload> (RETURN if same as keystore password):
+Enter

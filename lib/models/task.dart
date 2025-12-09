@@ -19,6 +19,7 @@ class Task {
   List<String> tags;
   DateTime? lastCommentAt;
   DateTime? createdAt; // YENİ: Oluşturulma Zamanı
+  String? completedBy;
 
   Task({
     this.id,
@@ -37,6 +38,7 @@ class Task {
     List<String>? tags,
     this.lastCommentAt,
     this.createdAt, // Constructor
+    this.completedBy,
   }) : subTasks = subTasks ?? [],
        tags = tags ?? [];
 
@@ -57,6 +59,7 @@ class Task {
       'tags': tags,
       'lastCommentAt': lastCommentAt?.toIso8601String(),
       'createdAt': createdAt?.toIso8601String(), // Map'e ekle
+      'completedBy': completedBy,
     };
   }
 
@@ -90,6 +93,7 @@ class Task {
       lastCommentAt: map['lastCommentAt'] != null ? DateTime.parse(map['lastCommentAt']) : null,
       // Eğer eski görevlerde tarih yoksa, listenin en altına atmak için eski bir tarih (2000 yılı) veriyoruz
       createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime(2000), 
+      completedBy: map['completedBy'],
     );
   }
 }

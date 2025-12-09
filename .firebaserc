@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "odaklist"
-  }
+  },
+  "targets": {
+    "odaklist": {
+      "hosting": {
+        "app": [
+          "cofocus"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

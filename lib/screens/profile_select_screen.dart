@@ -1,5 +1,3 @@
-// Dosya: lib/screens/profile_select_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:odak_list/models/team_member.dart';
 import 'package:odak_list/screens/navigation_screen.dart';
@@ -10,9 +8,6 @@ import 'package:provider/provider.dart';
 class ProfileSelectScreen extends StatelessWidget {
   const ProfileSelectScreen({super.key});
 
-  // --- _addNewMember FONKSİYONUNU SİLDİK --- (Artık buradan ekleme yapılmayacak)
-
-  // --- GİRİŞ KONTROLÜ ---
   void _onProfileTap(BuildContext context, TeamMember member) {
     if (member.profilePin != null && member.profilePin!.isNotEmpty) {
       _showPinDialog(context, member);
@@ -38,7 +33,7 @@ class ProfileSelectScreen extends StatelessWidget {
         content: TextField(
           controller: pinCheckController,
           autofocus: true,
-          obscureText: true, // Şifreyi gizle
+          obscureText: true,
           keyboardType: TextInputType.number,
           maxLength: 4,
           textAlign: TextAlign.center,
@@ -80,7 +75,7 @@ class ProfileSelectScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Kim İzliyor?"),
         centerTitle: true,
-        automaticallyImplyLeading: false, // Geri butonunu kaldır
+        automaticallyImplyLeading: false,
       ),
       body: StreamBuilder<List<TeamMember>>(
         stream: DatabaseService().getTeamMembersStream(),
@@ -91,61 +86,72 @@ class ProfileSelectScreen extends StatelessWidget {
 
           final members = snapshot.data ?? [];
 
-          return GridView.builder(
-            padding: const EdgeInsets.all(20),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 20,
-              mainAxisSpacing: 20,
-            ),
-            // ARTIK +1 YOK, SADECE MEVCUT ÜYELER
-            itemCount: members.length, 
-            itemBuilder: (context, index) {
-              
-              // "Profil Ekle" KARTINI BURADAN KALDIRDIK
+          // WEB UYUMLULUĞU: İçeriği Ortala ve Genişliği Sınırla
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600), // Web'de maksimum 600px
+              child: GridView.builder(
+                padding: const EdgeInsets.all(40),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 30,
+                  mainAxisSpacing: 30,
+                  childAspectRatio: 0.9, // Kartların oranını biraz daha kareye yakın tut
+                ),
+                itemCount: members.length, 
+                itemBuilder: (context, index) {
+                  final member = members[index];
+                  final hasPin = member.profilePin != null && member.profilePin!.isNotEmpty;
 
-              final member = members[index];
-              final hasPin = member.profilePin != null && member.profilePin!.isNotEmpty;
-
-              return GestureDetector(
-                onTap: () => _onProfileTap(context, member),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: member.role == 'admin' ? Colors.blue.shade50 : Colors.white,
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: member.role == 'admin' ? Colors.blue : Colors.grey.shade300, width: 2),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))
-                    ]
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Stack(
+                  return GestureDetector(
+                    onTap: () => _onProfileTap(context, member),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: member.role == 'admin' ? Colors.blue.shade50 : Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: member.role == 'admin' ? Colors.blue : Colors.grey.shade300, width: 2),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 8))
+                        ]
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          CircleAvatar(
-                            radius: 35,
-                            backgroundColor: member.role == 'admin' ? Colors.blue : Colors.orange,
-                            child: Text(
-                              member.name.isNotEmpty ? member.name[0].toUpperCase() : "?", 
-                              style: const TextStyle(fontSize: 30, color: Colors.white, fontWeight: FontWeight.bold)
-                            ),
+                          Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 40,
+                                backgroundColor: member.role == 'admin' ? Colors.blue : Colors.orange,
+                                child: Text(
+                                  member.name.isNotEmpty ? member.name[0].toUpperCase() : "?", 
+                                  style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)
+                                ),
+                              ),
+                              if (hasPin)
+                                const Positioned(
+                                  right: 0, bottom: 0,
+                                  child: CircleAvatar(radius: 14, backgroundColor: Colors.white, child: Icon(Icons.lock, size: 18, color: Colors.black)),
+                                )
+                            ],
                           ),
-                          if (hasPin)
-                            const Positioned(
-                              right: 0, bottom: 0,
-                              child: CircleAvatar(radius: 12, backgroundColor: Colors.white, child: Icon(Icons.lock, size: 16, color: Colors.black)),
-                            )
+                          const SizedBox(height: 20),
+                          Text(member.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20), textAlign: TextAlign.center),
+                          const SizedBox(height: 5),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: member.role == 'admin' ? Colors.blue.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10)
+                            ),
+                            child: Text(member.role == 'admin' ? "Yönetici" : "Editör", style: TextStyle(color: member.role == 'admin' ? Colors.blue : Colors.orange, fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 15),
-                      Text(member.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                      Text(member.role == 'admin' ? "Yönetici" : "Editör", style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                    ],
-                  ),
-                ),
-              );
-            },
+                    ),
+                  );
+                },
+              ),
+            ),
           );
         },
       ),

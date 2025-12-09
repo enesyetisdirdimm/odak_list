@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:audioplayers/audioplayers.dart'; // Ses Paketi
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:odak_list/services/notification_service.dart';
 import 'package:odak_list/utils/app_colors.dart';
@@ -27,12 +27,10 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   bool isRunning = false;
   String currentMode = 'Odaklan';
 
-  // --- SES SİSTEMİ DEĞİŞKENLERİ ---
   final AudioPlayer _audioPlayer = AudioPlayer();
-  String? _playingSound; // Şu an çalan sesin adı (rain, forest vs.)
-  bool _isSoundLoading = false; // Yükleniyor mu?
+  String? _playingSound; 
+  bool _isSoundLoading = false; 
 
-  // Ses Listesi
   final List<Map<String, dynamic>> _sounds = [
     {'id': 'rain', 'name': 'Yağmur', 'icon': Icons.water_drop, 'file': 'sounds/rain.mp3'},
     {'id': 'forest', 'name': 'Orman', 'icon': Icons.forest, 'file': 'sounds/forest.mp3'},
@@ -43,22 +41,19 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   void dispose() {
     _timer?.cancel();
     _audioPlayer.dispose();
-    WakelockPlus.disable(); // YENİ: Sayfadan çıkınca ekranı serbest bırak
+    WakelockPlus.disable(); 
     super.dispose();
   }
 
-  // Ses Aç/Kapa Fonksiyonu
   Future<void> _toggleSound(String id, String fileName) async {
     if (_playingSound == id) {
-      // Zaten bu çalıyor, durdur
       await _audioPlayer.stop();
       setState(() => _playingSound = null);
     } else {
-      // Yeni ses çal
       setState(() => _isSoundLoading = true);
       try {
-        await _audioPlayer.stop(); // Öncekini durdur
-        await _audioPlayer.setReleaseMode(ReleaseMode.loop); // Döngüye al (Sürekli çalsın)
+        await _audioPlayer.stop(); 
+        await _audioPlayer.setReleaseMode(ReleaseMode.loop); 
         await _audioPlayer.play(AssetSource(fileName));
         setState(() => _playingSound = id);
       } catch (e) {
@@ -76,11 +71,11 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     HapticFeedback.selectionClick();
     if (isRunning) {
       _timer?.cancel();
-      WakelockPlus.disable(); // YENİ: Ekran kapanabilir
+      WakelockPlus.disable(); 
       setState(() => isRunning = false);
     } else {
       setState(() => isRunning = true);
-      WakelockPlus.enable(); // YENİ: Ekran ASLA kapanmasın
+      WakelockPlus.enable(); 
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (remainingSeconds > 0) {
           setState(() => remainingSeconds--);
@@ -92,7 +87,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   }
   void _finishTimer() {
     _timer?.cancel();
-    WakelockPlus.disable(); // YENİ: İş bitti, ekran kapanabilir
+    WakelockPlus.disable(); 
     setState(() => isRunning = false);
     NotificationService().showInstantNotification(); 
     
@@ -117,7 +112,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   void resetTimer() {
     HapticFeedback.selectionClick();
     _timer?.cancel();
-    _audioPlayer.stop(); // Sıfırlayınca sesi de kapat
+    _audioPlayer.stop(); 
     setState(() {
       isRunning = false;
       remainingSeconds = initialSeconds;
@@ -127,7 +122,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   void changeMode(String mode, int seconds) {
     _timer?.cancel();
-    _audioPlayer.stop(); // Mod değişince sesi kapat
+    _audioPlayer.stop(); 
     setState(() {
       currentMode = mode;
       initialSeconds = seconds;
@@ -157,154 +152,160 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
     return Scaffold(
       backgroundColor: bgColor,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Mod Seçimi
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildModeButton('Odaklan', focusTime, isDarkMode, themeProvider),
-                    const SizedBox(width: 10),
-                    _buildModeButton('Kısa Mola', shortBreakTime, isDarkMode, themeProvider),
-                    const SizedBox(width: 10),
-                    _buildModeButton('Uzun Mola', longBreakTime, isDarkMode, themeProvider),
-                  ],
-                ),
-              ),
-              
-              const Spacer(),
-
-              // Sayaç
-              Stack(
-                alignment: Alignment.center,
+      body: Center(
+        // WEB İÇİN DÜZELTME: Maksimum genişlik 600px
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  SizedBox(
-                    width: 300,
-                    height: 300,
-                    child: CircularProgressIndicator(
-                      value: progress,
-                      strokeWidth: 20,
-                      backgroundColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        currentMode == 'Odaklan' 
-                            ? themeProvider.secondaryColor 
-                            : AppColors.categoryHome,
-                      ),
+                  // Mod Seçimi
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildModeButton('Odaklan', focusTime, isDarkMode, themeProvider),
+                        const SizedBox(width: 10),
+                        _buildModeButton('Kısa Mola', shortBreakTime, isDarkMode, themeProvider),
+                        const SizedBox(width: 10),
+                        _buildModeButton('Uzun Mola', longBreakTime, isDarkMode, themeProvider),
+                      ],
                     ),
                   ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
+                  
+                  const Spacer(),
+
+                  // Sayaç
+                  Stack(
+                    alignment: Alignment.center,
                     children: [
-                      Text(
-                        timerText,
-                        style: TextStyle(
-                          fontSize: 60,
-                          fontWeight: FontWeight.bold,
-                          color: textColor,
+                      SizedBox(
+                        width: 300,
+                        height: 300,
+                        child: CircularProgressIndicator(
+                          value: progress,
+                          strokeWidth: 20,
+                          backgroundColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            currentMode == 'Odaklan' 
+                                ? themeProvider.secondaryColor 
+                                : AppColors.categoryHome,
+                          ),
                         ),
                       ),
-                      Text(
-                        currentMode,
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: subTextColor,
-                          fontWeight: FontWeight.w500
-                        ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            timerText,
+                            style: TextStyle(
+                              fontSize: 60,
+                              fontWeight: FontWeight.bold,
+                              color: textColor,
+                            ),
+                          ),
+                          Text(
+                            currentMode,
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: subTextColor,
+                              fontWeight: FontWeight.w500
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-              ),
 
-              const SizedBox(height: 30),
+                  const SizedBox(height: 30),
 
-              // --- ODAK SESLERİ MENÜSÜ ---
-              Container(
-                padding: const EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: isDarkMode ? [] : [
-                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      "Odak Sesleri",
-                      style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14),
+                  // --- ODAK SESLERİ MENÜSÜ ---
+                  Container(
+                    padding: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: isDarkMode ? [] : [
+                        BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+                      ],
                     ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: _sounds.map((sound) {
-                        bool isPlaying = _playingSound == sound['id'];
-                        return GestureDetector(
-                          onTap: () => _toggleSound(sound['id'], sound['file']),
-                          child: Column(
-                            children: [
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 300),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: isPlaying 
-                                      ? themeProvider.secondaryColor 
-                                      : (isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200),
-                                  shape: BoxShape.circle,
-                                  boxShadow: isPlaying ? [
-                                    BoxShadow(color: themeProvider.secondaryColor.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 2))
-                                  ] : [],
-                                ),
-                                child: Icon(
-                                  sound['icon'], 
-                                  color: isPlaying ? Colors.white : subTextColor,
-                                  size: 28,
-                                ),
+                    child: Column(
+                      children: [
+                        Text(
+                          "Odak Sesleri",
+                          style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: _sounds.map((sound) {
+                            bool isPlaying = _playingSound == sound['id'];
+                            return GestureDetector(
+                              onTap: () => _toggleSound(sound['id'], sound['file']),
+                              child: Column(
+                                children: [
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 300),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: isPlaying 
+                                          ? themeProvider.secondaryColor 
+                                          : (isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200),
+                                      shape: BoxShape.circle,
+                                      boxShadow: isPlaying ? [
+                                        BoxShadow(color: themeProvider.secondaryColor.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 2))
+                                      ] : [],
+                                    ),
+                                    child: Icon(
+                                      sound['icon'], 
+                                      color: isPlaying ? Colors.white : subTextColor,
+                                      size: 28,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(sound['name'], style: TextStyle(fontSize: 12, color: isPlaying ? themeProvider.secondaryColor : subTextColor, fontWeight: isPlaying ? FontWeight.bold : FontWeight.normal)),
+                                ],
                               ),
-                              const SizedBox(height: 5),
-                              Text(sound['name'], style: TextStyle(fontSize: 12, color: isPlaying ? themeProvider.secondaryColor : subTextColor, fontWeight: isPlaying ? FontWeight.bold : FontWeight.normal)),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-              ),
-
-              const Spacer(),
-
-              // Kontrol Butonları
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ElevatedButton(
-                    onPressed: toggleTimer,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-                      backgroundColor: isRunning ? AppColors.priorityHigh : themeProvider.secondaryColor,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
-                    child: Text(
-                      isRunning ? "DURAKLAT" : "BAŞLAT",
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                            );
+                          }).toList(),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 20),
-                  IconButton(
-                    onPressed: resetTimer,
-                    icon: Icon(Icons.refresh, size: 32, color: subTextColor),
+
+                  const Spacer(),
+
+                  // Kontrol Butonları
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: toggleTimer,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
+                          backgroundColor: isRunning ? AppColors.priorityHigh : themeProvider.secondaryColor,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        ),
+                        child: Text(
+                          isRunning ? "DURAKLAT" : "BAŞLAT",
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      IconButton(
+                        onPressed: resetTimer,
+                        icon: Icon(Icons.refresh, size: 32, color: subTextColor),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 20),
                 ],
               ),
-              const SizedBox(height: 20),
-            ],
+            ),
           ),
         ),
       ),

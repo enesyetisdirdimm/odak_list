@@ -9,6 +9,8 @@ import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/team_member.dart';
 import 'package:firebase_storage/firebase_storage.dart' hide Task; // Storage Paketi
 import 'dart:io'; // Dosya işlemleri için
+import 'dart:typed_data';
+
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -17,6 +19,8 @@ class DatabaseService {
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  final FirebaseStorage _storage = FirebaseStorage.instance;
 
   // --- ORTAK PROJE VE GÖREVLER ---
   CollectionReference get _projectsRef => _db.collection('projects');
@@ -349,5 +353,20 @@ class DatabaseService {
     
     // 3. Kaydet
     await batch.commit();
+  }
+
+ Future<String?> uploadFileWeb(Uint8List bytes, String fileName) async {
+    try {
+      // Benzersiz bir isim oluştur (Çakışmayı önler)
+      String uniqueName = "${DateTime.now().millisecondsSinceEpoch}_$fileName";
+      var ref = _storage.ref().child('uploads/$uniqueName');
+      
+      // Web'de putFile değil, putData kullanılır
+      var uploadTask = await ref.putData(bytes); 
+      return await uploadTask.ref.getDownloadURL();
+    } catch (e) {
+      print("Web Upload Hatası: $e");
+      return null;
+    }
   }
 }

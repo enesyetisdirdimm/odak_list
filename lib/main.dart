@@ -1,11 +1,12 @@
 // Dosya: lib/main.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // Web kontrolü (kIsWeb) için şart
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:odak_list/screens/navigation_screen.dart';
 import 'package:odak_list/services/database_service.dart';
-import 'package:odak_list/services/notification_service.dart';
+import 'package:odak_list/services/notification_service.dart' as notify;
 import 'package:odak_list/theme_provider.dart';
 import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/utils/app_colors.dart';
@@ -18,12 +19,24 @@ import 'package:odak_list/screens/login_screen.dart';
 import 'package:odak_list/services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:odak_list/screens/profile_select_screen.dart';
-import 'package:odak_list/services/purchase_api.dart'; // Satın Alma Servisi
-import 'package:odak_list/screens/verify_email_screen.dart'; // Mail Doğrulama
+import 'package:odak_list/services/purchase_api.dart'; 
+import 'package:odak_list/screens/verify_email_screen.dart'; 
 
-// Yerel Zaman Dilimi Ayarı
+// Yerel Zaman Dilimi Ayarı (Web Uyumlu)
 Future<void> _configureLocalTimeZone() async {
   tz.initializeTimeZones();
+  
+  // Web'de yerel zaman dilimi eklentisi çalışmaz, direkt UTC ayarla
+  if (kIsWeb) {
+    try {
+      tz.setLocalLocation(tz.getLocation('UTC'));
+    } catch (e) {
+      print("Web Timezone Ayarı Hatası: $e");
+    }
+    return;
+  }
+
+  // Mobil için normal ayar
   String timeZoneName;
   try {
     timeZoneName = await FlutterTimezone.getLocalTimezone();
@@ -40,25 +53,44 @@ Future<void> _configureLocalTimeZone() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. Firebase Başlat
+  // 1. Firebase ve Servisleri Başlat (WEB İÇİN ÖZEL AYAR)
   try {
-    await Firebase.initializeApp();
-    // 2. Satın Alma Servisini Başlat
-    await PurchaseApi.init();
+    if (kIsWeb) {
+      // WEB İÇİN MANUEL CONFIG (Hatasız Başlatma)
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: "AIzaSyBpNso9JhJkYAgplazcdQATfcx5t-IVxAM",
+          authDomain: "odaklist.firebaseapp.com",
+          projectId: "odaklist",
+          storageBucket: "odaklist.firebasestorage.app",
+          messagingSenderId: "873035973416",
+          appId: "1:873035973416:web:d84a25f431318813cc061d",
+        ),
+      );
+    } else {
+      // MOBİL İÇİN OTOMATİK BAŞLATMA
+      await Firebase.initializeApp();
+    }
+
+    // DÜZELTME: Satın alma servisini WEB'de çalıştırma (Hata verdirir)
+    if (!kIsWeb) {
+      await PurchaseApi.init();
+    }
   } catch (e) {
-    print("Başlatma hatası: $e");
+    print("Başlatma hatası (Firebase/Purchase): $e");
   }
   
   final dbService = DatabaseService();
   
-  // 3. Onboarding Kontrolü
+  // 2. Onboarding Kontrolü
   final prefs = await SharedPreferences.getInstance();
   final bool seenOnboarding = prefs.getBool('seenOnboarding') ?? false;
 
-  // 4. Bildirim ve Zaman Dilimi Ayarları
+  // 3. Bildirim ve Zaman Dilimi Ayarları
   try {
     await _configureLocalTimeZone();
-    await NotificationService().init();
+    // Bildirim servisini başlat (İçinde Web kontrolü var)
+    await notify.NotificationService().init();
   } catch (e) {
     print("Servis hatası: $e");
   }
@@ -72,7 +104,7 @@ void main() async {
       child: MyApp(
         dbService: dbService, 
         startScreen: seenOnboarding 
-            ? const AuthWrapper() // Akıllı Giriş Kontrolü
+            ? const AuthWrapper() 
             : OnboardingScreen(dbService: dbService),
       ),
     ),
@@ -91,7 +123,7 @@ class MyApp extends StatelessWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'CoFocus', // Uygulama Adı
+      title: 'CoFocus', 
       
       // --- AÇIK TEMA ---
       theme: ThemeData(
@@ -130,7 +162,6 @@ class MyApp extends StatelessWidget {
 
       themeMode: themeProvider.themeMode,
       
-      // Başlangıç Ekranı (Onboarding veya AuthWrapper)
       home: startScreen, 
     );
   }
@@ -156,11 +187,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
 
         // 2. Kullanıcı Girişi Varsa -> Mail Onayını ve Profili Kontrol Et
-        // FutureBuilder kullanarak 'reload()' işleminin bitmesini bekliyoruz.
         return FutureBuilder<void>(
-          future: snapshot.data!.reload(), // Kullanıcı bilgisini tazele
+          future: snapshot.data!.reload(), 
           builder: (context, asyncSnapshot) {
-            // Not: reload() void döner, veriyi FirebaseAuth.instance'dan alırız.
             
             final user = FirebaseAuth.instance.currentUser;
             
@@ -169,22 +198,21 @@ class _AuthWrapperState extends State<AuthWrapper> {
               return const VerifyEmailScreen();
             }
 
-            // B. Mail Onaylıysa -> Profil Kontrolü (Provider)
+            // B. Mail Onaylıysa -> Profil Kontrolü
             return Consumer<TaskProvider>(
               builder: (context, taskProvider, child) {
-                // TaskProvider verileri yüklüyorsa (Profil kontrolü dahil)
                 if (taskProvider.isLoading) {
                   return const Scaffold(
                     body: Center(child: CircularProgressIndicator()),
                   );
                 }
 
-                // Hafızada kayıtlı bir profil başarıyla seçildiyse -> Ana Ekran
+                // Hafızada kayıtlı bir profil varsa -> Ana Ekran
                 if (taskProvider.currentMember != null) {
                   return NavigationScreen(dbService: DatabaseService());
                 }
 
-                // Kayıtlı profil yoksa veya silinmişse -> Profil Seçimi
+                // Kayıtlı profil yoksa -> Profil Seçimi
                 return const ProfileSelectScreen();
               },
             );
