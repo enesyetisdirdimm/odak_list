@@ -75,7 +75,9 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
         recurrence: widget.task.recurrence,
         tags: List.from(widget.task.tags),
         lastCommentAt: widget.task.lastCommentAt,
-        createdAt: widget.task.createdAt);
+        createdAt: widget.task.createdAt,
+        completedBy: widget.task.completedBy,
+        order: widget.task.order); // Order eklendi
     _titleController = TextEditingController(text: _tempTask.title);
     _notesController = TextEditingController(text: _tempTask.notes);
     _subTaskController = TextEditingController();
@@ -134,20 +136,42 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
   }
 
   void _saveTask() async {
-    if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Başlık giriniz')));
-      return;
+  // 1. Validasyon Kontrolü
+  if (_titleController.text.trim().isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Başlık giriniz')));
+    return;
+  }
+
+  // --- DEBUG BAŞLANGICI (BURAYI KOPYALA) ---
+  final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+  
+  print("🛑 --- DEBUG BAŞLADI ---");
+  print("1. Şu anki Kullanıcı (CurrentMember): ${taskProvider.currentMember}");
+  print("2. Kullanıcı Adı: ${taskProvider.currentMember?.name}");
+  print("3. Kullanıcı ID'si: ${taskProvider.currentMember?.id}");
+  
+  // Üye listesini kontrol edelim, belki liste boştur?
+  print("4. Yüklü Üye Sayısı (TeamMembers): ${taskProvider.teamMembers.length}");
+  // --- DEBUG SONU ---
+
+  _tempTask.title = _titleController.text.trim();
+  _tempTask.notes = _notesController.text.trim();
+
+  if (_tempTask.dueDate == null && _tempTask.id == null) {
+    _tempTask.dueDate = DateTime.now();
+  }
+
+  // --- KRİTİK DEBUG NOKTASI ---
+  if (_tempTask.id == null) {
+    // ID Atama denemesi
+    if (_tempTask.creatorId == null) {
+       print("5. CreatorId boş, atama yapılıyor..."); 
+       _tempTask.creatorId = taskProvider.currentMember?.id;
     }
-    _tempTask.title = _titleController.text.trim();
-    _tempTask.notes = _notesController.text.trim();
-    if (_tempTask.dueDate == null && _tempTask.id == null) {
-      _tempTask.dueDate = DateTime.now();
-    }
-    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
-    if (_tempTask.id == null) {
-      await taskProvider.addTask(_tempTask);
-    } else {
+    print("6. Kaydetmeden hemen önceki CreatorId: ${_tempTask.creatorId}");
+    
+    await taskProvider.addTask(_tempTask);
+  } else {
       await taskProvider.updateTask(_tempTask);
       if (taskProvider.currentMember != null) {
         await widget.dbService.addActivityLog(_tempTask.id!,
@@ -303,36 +327,35 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
     final taskProvider = Provider.of<TaskProvider>(context);
     final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
 
-    // Web'de BEMBEYAZ olsun
-    final bgColor = widget.isEmbeddedWeb
-        ? Colors.white
-        : Theme.of(context).scaffoldBackgroundColor;
-    final textColor =
-        isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    // Web'de (veya karanlık modda) renk uyumu
+    final bgColor = isDarkMode 
+        ? const Color(0xFF1E1E1E) 
+        : (widget.isEmbeddedWeb ? Colors.white : Theme.of(context).scaffoldBackgroundColor);
+        
+    final textColor = isDarkMode ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final iconColor = isDarkMode ? AppColors.textSecondaryDark : Colors.black;
 
     final currentMemberId = taskProvider.currentMember?.id;
     final bool isAdmin = taskProvider.isAdmin;
     final bool isNewTask = _tempTask.id == null;
     final bool isCreator = _tempTask.creatorId == currentMemberId;
-    final bool canEdit =
-        isAdmin || isNewTask || isCreator || _tempTask.assignedMemberId == null;
+    final bool canEdit = isAdmin || isNewTask || isCreator || _tempTask.assignedMemberId == null;
     final bool isPremium = taskProvider.isPremium;
 
-    // --- ÖZEL BAŞLIK (WEB İÇİN HİZALI) ---
+    // --- ÖZEL BAŞLIK (WEB İÇİN) ---
     Widget buildWebHeader() {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        color: Colors.white, // Web'de başlık beyaz olsun
+        // DÜZELTME: Padding ayarlandı (Bottom 10px, sol tarafla uyumlu)
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
+        color: bgColor,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Görev Detayı",
-                    style:
-                        TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                Text("Görev Detayı",
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textColor)),
                 Text(
                     widget.isEmbeddedWeb
                         ? "Düzenlemek için alanları kullanın"
@@ -349,7 +372,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
                       tooltip: "Sil"),
                 if (widget.onClose != null) // Kapat Butonu
                   IconButton(
-                      icon: const Icon(Icons.close),
+                      icon: Icon(Icons.close, color: iconColor),
                       onPressed: widget.onClose,
                       tooltip: "Kapat"),
                 const SizedBox(width: 8),
@@ -373,7 +396,6 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
 
     return Scaffold(
       backgroundColor: bgColor,
-      // Eğer Web ise AppBar'ı GİZLE (Çünkü özel header kullanacağız)
       appBar: widget.isEmbeddedWeb
           ? null
           : AppBar(
@@ -419,11 +441,17 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
       body: SafeArea(
         child: Column(
           children: [
-            // WEB İÇİN ÖZEL BAŞLIK VE TAB BAR (HİZALAMA İÇİN)
+            // WEB İÇİN ÖZEL BAŞLIK VE TAB BAR (HİZALAMA DÜZELTİLDİ)
             if (widget.isEmbeddedWeb) ...[
               buildWebHeader(),
+              
+              // --- DÜZELTME: SOL TARAFTAKİ ARAMA ÇUBUĞUYLA EŞİTLEMEK İÇİN BOŞLUK ---
+              // Sol: Arama (40px) + Padding (15px) = 55px
+              const SizedBox(height: 55), 
+              // ---------------------------------------------------------------------
+
               Container(
-                color: Colors.white,
+                color: bgColor,
                 child: TabBar(
                   controller: _tabController,
                   labelColor: themeProvider.secondaryColor,
@@ -440,14 +468,14 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
                 ),
               ),
               const SizedBox(
-                  height: 10), // Orta panel ile hizalamak için biraz boşluk
+                  height: 10), 
             ],
 
             Expanded(
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  // 1. SEKME: DETAYLAR (İÇERİK AYNI)
+                  // 1. SEKME: DETAYLAR
                   SingleChildScrollView(
                     padding: const EdgeInsets.all(24.0),
                     child: Column(
@@ -766,7 +794,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
                     ),
                   ),
 
-                  // 2. SEKME: YORUMLAR (CHAT TASARIMI)
+                  // 2. SEKME: YORUMLAR
                   _tempTask.id == null
                       ? const Center(
                           child: Text("Yorum yapmak için önce görevi kaydedin.",
@@ -1028,7 +1056,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
                               ]))
                         ]),
 
-                  // 3. SEKME: GEÇMİŞ (LOGLAR)
+                  // 3. SEKME: GEÇMİŞ
                   _tempTask.id == null
                       ? const Center(
                           child: Text("Geçmiş yok.",

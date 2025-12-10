@@ -20,6 +20,7 @@ class Task {
   DateTime? lastCommentAt;
   DateTime? createdAt; // YENİ: Oluşturulma Zamanı
   String? completedBy;
+  int order;
 
   Task({
     this.id,
@@ -39,6 +40,7 @@ class Task {
     this.lastCommentAt,
     this.createdAt, // Constructor
     this.completedBy,
+    this.order = 0,
   }) : subTasks = subTasks ?? [],
        tags = tags ?? [];
 
@@ -60,10 +62,19 @@ class Task {
       'lastCommentAt': lastCommentAt?.toIso8601String(),
       'createdAt': createdAt?.toIso8601String(), // Map'e ekle
       'completedBy': completedBy,
+      'order': order,
     };
   }
 
   factory Task.fromMap(Map<String, dynamic> map, String documentId) {
+    
+    if (map['creatorId'] == null) {
+      print("⚠️ UYARI: Veritabanından gelen ${map['title']} görevinde creatorId YOK!");
+    } else {
+      // Eğer dolu geliyorsa ne geldiğini görelim
+      print("✅ OKUNDU: ${map['title']} -> CreatorId: ${map['creatorId']}");
+    }
+    
     List<SubTask> loadedSubTasks = [];
     if (map['subTasks'] != null) {
       var list = map['subTasks'] as List;
@@ -94,6 +105,7 @@ class Task {
       // Eğer eski görevlerde tarih yoksa, listenin en altına atmak için eski bir tarih (2000 yılı) veriyoruz
       createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime(2000), 
       completedBy: map['completedBy'],
+      order: map['order'] ?? 0,
     );
   }
 }

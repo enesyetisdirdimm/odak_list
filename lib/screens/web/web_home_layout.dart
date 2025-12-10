@@ -9,6 +9,9 @@ import 'package:odak_list/utils/app_colors.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/services/database_service.dart';
 
+// --- SIRALAMA SEÇENEKLERİ (MANUEL EKLENDİ) ---
+enum SortOption { manual, newestFirst, dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
+
 class WebHomeLayout extends StatefulWidget {
   final DatabaseService dbService;
   const WebHomeLayout({super.key, required this.dbService});
@@ -22,9 +25,15 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
   String? _selectedProjectId; 
   bool _showOnlyMyTasks = false; 
   bool _isSidebarOpen = true; 
+  
+  // Arama ve Sıralama Durumları
+  String _searchQuery = '';
+  // VARSAYILAN: Manuel (Sürükle Bırak) - İstersen değiştirebilirsin
+  SortOption _currentSortOption = SortOption.manual; 
+  
+  final TextEditingController _searchController = TextEditingController();
 
   late TabController _tabController;
-  final ScrollController _taskScrollController = ScrollController();
   final ScrollController _projectScrollController = ScrollController();
 
   @override
@@ -36,9 +45,53 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
   @override
   void dispose() {
     _tabController.dispose();
-    _taskScrollController.dispose();
     _projectScrollController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  // --- GÖREVLERİ SIRALAMA MANTIĞI ---
+void _runSorting(List<Task> tasks) {
+    tasks.sort((a, b) {
+      switch (_currentSortOption) {
+        
+        // --- MANUEL (İyileştirilmiş) ---
+        case SortOption.manual:
+          // 1. Önce senin belirlediğin sıraya (order) bak
+          int result = a.order.compareTo(b.order);
+          
+          // 2. Eğer sıraları tesadüfen aynıysa, yeni olanı üste koy (Titremeyi önler)
+          if (result == 0) {
+             return (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000));
+          }
+          return result;
+
+        // --- EN YENİ (Newest First) ---
+        // Burası doğru: Yeni tarihli olan (b) en başa (a) gelir.
+        case SortOption.newestFirst:
+          return (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000));
+
+        // --- DİĞERLERİ (Aynı kalabilir) ---
+        case SortOption.dateAsc:
+          if (a.dueDate == null) return 1;
+          if (b.dueDate == null) return -1;
+          return a.dueDate!.compareTo(b.dueDate!);
+          
+        case SortOption.dateDesc:
+          if (a.dueDate == null) return 1;
+          if (b.dueDate == null) return -1;
+          return b.dueDate!.compareTo(a.dueDate!);
+          
+        case SortOption.priorityDesc:
+          return b.priority.compareTo(a.priority);
+          
+        case SortOption.priorityAsc:
+          return a.priority.compareTo(b.priority);
+          
+        case SortOption.titleAsc:
+          return a.title.compareTo(b.title);
+      }
+    });
   }
 
   // --- DİYALOGLAR (Aynı) ---
@@ -55,13 +108,35 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
     showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Projeyi Sil"), content: taskCount > 0 ? Text("⚠️ $taskCount görev var. Silinsin mi?") : const Text("Silinsin mi?"), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), onPressed: () async { final projectBackup = project; final tasksBackup = allTasks.where((t) => t.projectId == project.id).toList(); await provider.deleteProject(project.id!); if (ctx.mounted) Navigator.pop(ctx); if (mounted && _selectedProjectId == project.id) setState(() => _selectedProjectId = null); if (mounted) { ScaffoldMessenger.of(context).clearSnackBars(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'${project.title}' silindi."), behavior: SnackBarBehavior.floating, width: 400, action: SnackBarAction(label: 'GERİ AL', textColor: themeProvider.secondaryColor, onPressed: () async { await provider.restoreProjectData(projectBackup, tasksBackup); }))); } }, child: const Text("Sil"))]));
   }
 
-  void _deleteTaskWithUndo(Task task, TaskProvider provider, ThemeProvider themeProvider) async {
+ void _deleteTaskWithUndo(Task task, TaskProvider provider, ThemeProvider themeProvider) async {
     final backupTask = task; 
     await provider.deleteTask(task.id!);
+    
     if (_selectedTask?.id == task.id) setState(() => _selectedTask = null);
+    
     if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'${task.title}' silindi"), behavior: SnackBarBehavior.floating, width: 400, action: SnackBarAction(label: 'GERİ AL', textColor: themeProvider.secondaryColor, onPressed: () async { await widget.dbService.restoreTask(backupTask); })));
+      // Varsa önceki mesajı hemen temizle
+      ScaffoldMessenger.of(context).clearSnackBars(); 
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("'${task.title}' silindi"),
+          behavior: SnackBarBehavior.floating,
+          width: 400,
+          
+          // --- EKLENECEK SATIR ---
+          duration: const Duration(milliseconds: 1500), // 1.5 saniye sonra otomatik kaybolsun
+          // -----------------------
+          
+          action: SnackBarAction(
+            label: 'GERİ AL', 
+            textColor: themeProvider.secondaryColor, 
+            onPressed: () async { 
+              await widget.dbService.restoreTask(backupTask); 
+            }
+          )
+        )
+      );
     }
   }
 
@@ -71,11 +146,45 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
   }
 
   void _showAddTaskDialog(BuildContext context) {
-    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
-    if (taskProvider.projects.isEmpty) { _showAddProjectDialog(context, taskProvider); return; }
-    String defaultProjectId = _selectedProjectId ?? taskProvider.projects.first.id!;
-    showDialog(context: context, builder: (context) => Dialog(backgroundColor: Theme.of(context).scaffoldBackgroundColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), child: SizedBox(width: 600, height: 800, child: ClipRRect(borderRadius: BorderRadius.circular(20), child: TaskDetailScreen(task: Task(title: '', projectId: defaultProjectId), dbService: widget.dbService, isEmbeddedWeb: false)))));
+  final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+  
+  // Eğer proje yoksa proje ekleme diyaloğu aç (değişiklik yok)
+  if (taskProvider.projects.isEmpty) { 
+    _showAddProjectDialog(context, taskProvider); 
+    return; 
   }
+  
+  String defaultProjectId = _selectedProjectId ?? taskProvider.projects.first.id!;
+  
+  // --- DÜZELTME BURADA BAŞLIYOR ---
+  // Mevcut kullanıcının ID'sini alıyoruz
+  String? currentUserId = taskProvider.currentMember?.id;
+
+  showDialog(
+    context: context, 
+    builder: (context) => Dialog(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), 
+      child: SizedBox(
+        width: 600, 
+        height: 800, 
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20), 
+          child: TaskDetailScreen(
+            // creatorId'yi burada set ediyoruz:
+            task: Task(
+              title: '', 
+              projectId: defaultProjectId,
+              creatorId: currentUserId // <--- BU SATIRI EKLE
+            ), 
+            dbService: widget.dbService, 
+            isEmbeddedWeb: false
+          )
+        )
+      )
+    )
+  );
+}
 
   // ==========================================
   // ARAYÜZ
@@ -89,29 +198,40 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
     // RENKLER
     final Color bgColor = isDark ? const Color(0xFF121212) : const Color(0xFFF0F2F5); 
     final Color sidebarColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    // SAĞ PANEL RENGİ: TAM BEYAZ
-    final Color detailColor = isDark ? const Color(0xFF1E1E1E) : Colors.white; 
+    final Color detailColor = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFFAFAFA); 
     
+    // 1. Filtreleme
     List<Task> filteredTasks = taskProvider.tasks;
     if (_selectedProjectId != null) filteredTasks = filteredTasks.where((t) => t.projectId == _selectedProjectId).toList();
     if (_showOnlyMyTasks) {
       final myId = taskProvider.currentMember?.id;
       if (myId != null) filteredTasks = filteredTasks.where((t) => t.assignedMemberId == myId).toList();
     }
+
+    // 2. Arama
+    if (_searchQuery.isNotEmpty) {
+      filteredTasks = filteredTasks.where((t) {
+        final query = _searchQuery.toLowerCase();
+        return t.title.toLowerCase().contains(query) || t.tags.any((tag) => tag.toLowerCase().contains(query));
+      }).toList();
+    }
     
+    // 3. Listeleri Ayırma
     final activeTasks = filteredTasks.where((t) => !t.isDone).toList();
     final completedTasks = filteredTasks.where((t) => t.isDone).toList();
-    activeTasks.sort((a, b) => (a.dueDate ?? DateTime(2100)).compareTo(b.dueDate ?? DateTime(2100)));
-    completedTasks.sort((a, b) => (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000)));
+
+    // 4. SIRALAMA
+    _runSorting(activeTasks);
+    // Tamamlananları genelde tarihe göre sıralamak daha mantıklıdır, manuel sıralama karışmasın
+    // Ancak kullanıcı isterse burada da manuel çalışır.
+    _runSorting(completedTasks);
 
     return Scaffold(
       backgroundColor: bgColor,
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // -----------------------------------------------------
-          // SÜTUN 1: SIDEBAR (Sadece Yazı)
-          // -----------------------------------------------------
+          // SÜTUN 1: SIDEBAR
           AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
@@ -123,12 +243,10 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
                   maxWidth: 260, minWidth: 260, alignment: Alignment.topLeft,
                   child: Column(
                     children: [
-                      // --- LOGO YOK, SADECE YAZI ---
                       Padding(
                         padding: const EdgeInsets.fromLTRB(24, 32, 24, 20),
                         child: Row(
                           children: [
-                            // Logo icon/image kaldırıldı
                             Text("CoFocus", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: -0.5, color: isDark ? Colors.white : Colors.black87)),
                           ],
                         ),
@@ -192,9 +310,7 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
             ),
           ),
 
-          // -----------------------------------------------------
           // SÜTUN 2: GÖREV LİSTESİ
-          // -----------------------------------------------------
           Expanded(
             flex: 3,
             child: Container(
@@ -203,7 +319,7 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
                 children: [
                   // HEADER
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
                     color: sidebarColor,
                     child: Row(
                       children: [
@@ -236,7 +352,72 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
                       ],
                     ),
                   ),
+
+                  // ARAMA VE SIRALAMA ALANI
+                  Container(
+                    color: sidebarColor,
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 15),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.grey.withOpacity(0.2))
+                            ),
+                            child: TextField(
+                              controller: _searchController,
+                              onChanged: (val) => setState(() => _searchQuery = val),
+                              style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                              decoration: InputDecoration(
+                                hintText: "Görev Ara...",
+                                hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+                                prefixIcon: const Icon(Icons.search, size: 20, color: Colors.grey),
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                                suffixIcon: _searchQuery.isNotEmpty 
+                                  ? IconButton(icon: const Icon(Icons.clear, size: 18, color: Colors.grey), onPressed: () { _searchController.clear(); setState(() => _searchQuery = ''); }) 
+                                  : null
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        
+                        // SIRALAMA BUTONU
+                        Container(
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.grey.shade900 : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.grey.withOpacity(0.3))
+                          ),
+                          child: PopupMenuButton<SortOption>(
+                            icon: Icon(Icons.sort, color: themeProvider.secondaryColor),
+                            tooltip: "Sırala",
+                            onSelected: (SortOption result) {
+                              setState(() {
+                                _currentSortOption = result;
+                              });
+                            },
+                            itemBuilder: (BuildContext context) => <PopupMenuEntry<SortOption>>[
+                              const PopupMenuItem<SortOption>(value: SortOption.manual, child: Row(children: [Icon(Icons.drag_indicator, size: 18, color: Colors.grey), SizedBox(width: 8), Text('Manuel (Sürükle & Bırak)')])),
+                              const PopupMenuItem<SortOption>(value: SortOption.newestFirst, child: Text('En Yeni Eklenen (Varsayılan)')),
+                              const PopupMenuItem<SortOption>(value: SortOption.dateAsc, child: Text('Tarih (En Yakın)')),
+                              const PopupMenuItem<SortOption>(value: SortOption.dateDesc, child: Text('Tarih (En Uzak)')),
+                              const PopupMenuItem<SortOption>(value: SortOption.priorityDesc, child: Text('Öncelik (Yüksek)')),
+                              const PopupMenuItem<SortOption>(value: SortOption.priorityAsc, child: Text('Öncelik (Düşük)')),
+                              const PopupMenuItem<SortOption>(value: SortOption.titleAsc, child: Text('Alfabetik (A-Z)')),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   
+                  // TAB BAR
                   Container(
                     color: sidebarColor,
                     child: TabBar(
@@ -253,6 +434,7 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
 
                   const SizedBox(height: 10),
 
+                  // LİSTELER
                   Expanded(
                     child: TabBarView(
                       controller: _tabController,
@@ -267,9 +449,7 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
             ),
           ),
 
-          // -----------------------------------------------------
-          // SÜTUN 3: DETAY (BEMBEYAZ & HİZALI)
-          // -----------------------------------------------------
+          // SÜTUN 3: DETAY
           Expanded(
             flex: 4, 
             child: _selectedTask == null
@@ -297,127 +477,188 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
     );
   }
 
-  // --- KART TASARIMI (ESKİ STİL - CARD) ---
+  // --- GÖREV LİSTESİ OLUŞTURUCU (Sürükle-Bırak Entegreli) ---
   Widget _buildTaskList(List<Task> tasks, ThemeProvider themeProvider, TaskProvider taskProvider, BuildContext context, bool isDark) {
-    if (tasks.isEmpty) return const Center(child: Text("Görev bulunamadı", style: TextStyle(color: Colors.grey)));
-    
+    if (tasks.isEmpty) {
+      if (_searchQuery.isNotEmpty) return const Center(child: Text("Aramanızla eşleşen görev bulunamadı.", style: TextStyle(color: Colors.grey)));
+      return const Center(child: Text("Görev bulunamadı", style: TextStyle(color: Colors.grey)));
+    }
+
+    // --- MANUEL MOD İÇİN ÖZEL LİSTE ---
+    if (_currentSortOption == SortOption.manual && _searchQuery.isEmpty) {
+      return ReorderableListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        buildDefaultDragHandles: true,
+        proxyDecorator: (child, index, animation) {
+          return Material(
+            color: Colors.transparent,
+            elevation: 5,
+            shadowColor: Colors.black.withOpacity(0.2),
+            child: child,
+          );
+        },
+        onReorder: (int oldIndex, int newIndex) {
+           // 1. Flutter'ın ReorderableListView hatasını düzelt (Aşağı sürükleyince index kayması)
+           if (newIndex > oldIndex) {
+             newIndex -= 1;
+           }
+
+           // 2. GÖRÜNEN listeyi (tasks) geçici olarak manipüle et
+           final Task item = tasks.removeAt(oldIndex);
+           tasks.insert(newIndex, item);
+
+           // 3. Yeni sıralamaya göre "order" numaralarını baştan dağıt (0, 1, 2...)
+           for (int i = 0; i < tasks.length; i++) {
+             tasks[i].order = i;
+           }
+
+           // 4. Bu güncellenmiş listeyi Provider'a gönderip kaydet
+           taskProvider.updateOrderedList(tasks);
+        },
+        children: [
+          for (final task in tasks)
+            Container(
+              key: ValueKey(task.id),
+              margin: const EdgeInsets.only(bottom: 12),
+              child: _buildTaskCardItem(task, themeProvider, taskProvider, context, isDark),
+            ),
+        ],
+      );
+    }
+
+    // --- STANDART LİSTE ---
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       itemCount: tasks.length,
       itemBuilder: (context, index) {
         final task = tasks[index];
-        final isSelected = _selectedTask?.id == task.id;
-        
-        final cardColor = isSelected 
-            ? themeProvider.secondaryColor.withOpacity(0.1) 
-            : (isDark ? const Color(0xFF1E1E1E) : Colors.white);
-
-        String creatorName = taskProvider.getMemberName(task.creatorId) ?? "Anonim";
-        String assigneeName = task.assignedMemberId != null ? (taskProvider.getMemberName(task.assignedMemberId) ?? "?") : "Havuz";
-        String? completedBy = task.completedBy;
-
-        return Card(
-          elevation: isSelected ? 0 : 2,
-          color: cardColor,
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: isSelected ? BorderSide(color: themeProvider.secondaryColor, width: 1.5) : BorderSide.none
-          ),
-          child: InkWell(
-            onTap: () => setState(() => _selectedTask = task),
-            borderRadius: BorderRadius.circular(12),
-            child: Stack(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: SizedBox(
-                              width: 24, height: 24,
-                              child: Checkbox(
-                                value: task.isDone,
-                                activeColor: themeProvider.secondaryColor,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                onChanged: (val) => taskProvider.toggleTaskStatus(task),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(right: 30.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    task.title,
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                      decoration: task.isDone ? TextDecoration.lineThrough : null,
-                                      color: task.isDone ? Colors.grey : (isDark ? Colors.white : Colors.black87)
-                                    ),
-                                  ),
-                                  if (task.dueDate != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 6),
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.calendar_today, size: 12, color: task.dueDate!.isBefore(DateTime.now()) && !task.isDone ? Colors.red : Colors.grey),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            "${task.dueDate!.day}.${task.dueDate!.month}.${task.dueDate!.year}",
-                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: task.dueDate!.isBefore(DateTime.now()) && !task.isDone ? Colors.red : Colors.grey),
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      
-                      const SizedBox(height: 12),
-                      const Divider(height: 1),
-                      const SizedBox(height: 12),
-                      
-                      Wrap(
-                        spacing: 16,
-                        children: [
-                          _buildMetaRow(Icons.edit, "Oluşturan: $creatorName", Colors.grey),
-                          _buildMetaRow(Icons.person, "Atanan: $assigneeName", task.assignedMemberId == null ? Colors.orange : themeProvider.secondaryColor),
-                          if (task.isDone && completedBy != null)
-                             _buildMetaRow(Icons.check_circle, "Bitiren: $completedBy", Colors.green),
-                        ],
-                      )
-                    ],
-                  ),
-                ),
-
-                if (taskProvider.isAdmin)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: IconButton(
-                      icon: Icon(Icons.delete_outline, color: Colors.grey.withOpacity(0.4), size: 20),
-                      onPressed: () => _deleteTaskWithUndo(task, taskProvider, themeProvider),
-                      tooltip: "Sil",
-                    ),
-                  )
-              ],
-            ),
-          ),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12.0),
+          child: _buildTaskCardItem(task, themeProvider, taskProvider, context, isDark),
         );
       },
+    );
+  }
+
+  // --- KART TASARIMI (Ortak Kullanım) ---
+  Widget _buildTaskCardItem(Task task, ThemeProvider themeProvider, TaskProvider taskProvider, BuildContext context, bool isDark) {
+    final isSelected = _selectedTask?.id == task.id;
+        
+    final cardColor = isSelected 
+        ? themeProvider.secondaryColor.withOpacity(0.1) 
+        : (isDark ? const Color(0xFF1E1E1E) : Colors.white);
+
+    String creatorName = taskProvider.getMemberName(task.creatorId) ?? "Anonim";
+    String assigneeName = task.assignedMemberId != null ? (taskProvider.getMemberName(task.assignedMemberId) ?? "?") : "Havuz";
+    String? completedBy = task.completedBy;
+
+    return Card(
+      elevation: isSelected ? 0 : 2,
+      color: cardColor,
+      // margin: const EdgeInsets.only(bottom: 12), // Margin'i dışarıdaki Container'a taşıdık (Reorder için)
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isSelected ? BorderSide(color: themeProvider.secondaryColor, width: 1.5) : BorderSide.none
+      ),
+      child: InkWell(
+        onTap: () => setState(() => _selectedTask = task),
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Sürükle-Bırak Modundaysa Tutma İkonu Göster
+                      if (_currentSortOption == SortOption.manual)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8, top: 2),
+                          child: Icon(Icons.drag_indicator, size: 20, color: Colors.grey.withOpacity(0.4)),
+                        ),
+
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: SizedBox(
+                          width: 24, height: 24,
+                          child: Checkbox(
+                            value: task.isDone,
+                            activeColor: themeProvider.secondaryColor,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                            onChanged: (val) => taskProvider.toggleTaskStatus(task),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 30.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                task.title,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                  decoration: task.isDone ? TextDecoration.lineThrough : null,
+                                  color: task.isDone ? Colors.grey : (isDark ? Colors.white : Colors.black87)
+                                ),
+                              ),
+                              if (task.dueDate != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.calendar_today, size: 12, color: task.dueDate!.isBefore(DateTime.now()) && !task.isDone ? Colors.red : Colors.grey),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        "${task.dueDate!.day}.${task.dueDate!.month}.${task.dueDate!.year}",
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: task.dueDate!.isBefore(DateTime.now()) && !task.isDone ? Colors.red : Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                  
+                  Wrap(
+                    spacing: 16,
+                    children: [
+                      _buildMetaRow(Icons.edit, "Oluşturan: $creatorName", Colors.grey),
+                      _buildMetaRow(Icons.person, "Atanan: $assigneeName", task.assignedMemberId == null ? Colors.orange : themeProvider.secondaryColor),
+                      if (task.isDone && completedBy != null)
+                         _buildMetaRow(Icons.check_circle, "Bitiren: $completedBy", Colors.green),
+                    ],
+                  )
+                ],
+              ),
+            ),
+
+            if (taskProvider.isAdmin)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: IconButton(
+                  icon: Icon(Icons.delete_outline, color: Colors.grey.withOpacity(0.4), size: 20),
+                  onPressed: () => _deleteTaskWithUndo(task, taskProvider, themeProvider),
+                  tooltip: "Sil",
+                ),
+              )
+          ],
+        ),
+      ),
     );
   }
 

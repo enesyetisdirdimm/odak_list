@@ -7,10 +7,9 @@ import 'package:odak_list/models/comment.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/models/project.dart';
 import 'package:odak_list/models/team_member.dart';
-import 'package:firebase_storage/firebase_storage.dart' hide Task; // Storage Paketi
-import 'dart:io'; // Dosya işlemleri için
+import 'package:firebase_storage/firebase_storage.dart' hide Task;
+import 'dart:io'; 
 import 'dart:typed_data';
-
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -28,7 +27,6 @@ class DatabaseService {
 
   // --- CANLI VERİ AKIŞLARI (FİLTRELİ) ---
   
-  // Sadece giriş yapan kullanıcının (Owner) projelerini getirir
   Stream<List<Project>> getProjectsStream() {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return Stream.value([]);
@@ -43,7 +41,6 @@ class DatabaseService {
         });
   }
 
-  // Sadece giriş yapan kullanıcının (Owner) görevlerini getirir
   Stream<List<Task>> getTasksStream() {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return Stream.value([]);
@@ -63,16 +60,25 @@ class DatabaseService {
   Future<void> createProject(Project project) async {
     String? uid = _auth.currentUser?.uid;
     if (uid != null) {
-      project.ownerId = uid; // Sahibini mühürle
+      project.ownerId = uid; 
     }
     await _projectsRef.add(project.toMap());
   }
 
   Future<Task> createTask(Task task) async {
     String? uid = _auth.currentUser?.uid;
+    
     if (uid != null) {
-      task.ownerId = uid; // Sahibini mühürle
+      task.ownerId = uid; // Mevcut kod (Filtreleme için)
+
+      // --- EKLENEN KRİTİK KISIM ---
+      // Eğer arayüzden creatorId gönderilmediyse, arka planda zorla ekle
+      if (task.creatorId == null || task.creatorId!.isEmpty) {
+        task.creatorId = uid;
+      }
+      // -----------------------------
     }
+    
     var ref = await _tasksRef.add(task.toMap());
     task.id = ref.id;
     return task;
@@ -80,23 +86,17 @@ class DatabaseService {
 
   Future<void> updateTask(Task task) async {
     if (task.id == null) return;
-    // Güncellerken ownerId'yi değiştirmemeye dikkat ediyoruz (Modelde zaten var)
     await _tasksRef.doc(task.id).update(task.toMap());
   }
 
  Future<void> deleteProject(String projectId) async {
     WriteBatch batch = _db.batch();
-
-    // 1. Projenin Kendisini Sil
     batch.delete(_projectsRef.doc(projectId));
 
-    // 2. Projeye Bağlı Tüm Görevleri Bul ve Sil
     var tasksSnapshot = await _tasksRef.where('projectId', isEqualTo: projectId).get();
     for (var doc in tasksSnapshot.docs) {
       batch.delete(doc.reference);
     }
-
-    // 3. Hepsini Tek Seferde Uygula (Atomik İşlem)
     await batch.commit();
   }
 
@@ -109,16 +109,13 @@ class DatabaseService {
   Future<String?> uploadFile(String filePath, String fileName) async {
     try {
       File file = File(filePath);
-      // Dosyayı "attachments" klasörüne, benzersiz bir isimle kaydet
       String uniqueName = "${DateTime.now().millisecondsSinceEpoch}_$fileName";
       Reference ref = FirebaseStorage.instance.ref().child('attachments/$uniqueName');
       
       UploadTask uploadTask = ref.putFile(file);
       TaskSnapshot snapshot = await uploadTask;
       
-      // Yükleme bitince indirme linkini al
-      String downloadUrl = await snapshot.ref.getDownloadURL();
-      return downloadUrl;
+      return await snapshot.ref.getDownloadURL();
     } catch (e) {
       print("Dosya yükleme hatası: $e");
       return null;
@@ -127,7 +124,6 @@ class DatabaseService {
 
   // --- EKİP PROFİL YÖNETİMİ ---
 
-  // Profilleri Getir
   Stream<List<TeamMember>> getTeamMembersStream() {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return Stream.value([]);
@@ -137,8 +133,8 @@ class DatabaseService {
     });
   }
 
-  // Yeni Profil Ekle
-  Future<void> addTeamMember(String name, String role, String? pin) async {
+  // Yeni Profil Ekle (Email Eklendi)
+  Future<void> addTeamMember(String name, String role, String? pin, String? email) async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
 
@@ -146,6 +142,7 @@ class DatabaseService {
       'name': name,
       'role': role,
       'profilePin': pin,
+      'email': email, // E-posta kaydediliyor
     });
   }
 
@@ -156,13 +153,15 @@ class DatabaseService {
     await _db.collection('users').doc(uid).collection('members').doc(memberId).update({'role': newRole});
   }
 
-  Future<void> updateTeamMemberInfo(String memberId, String name, String? pin) async {
+  // Profil Bilgilerini Güncelle (Email Eklendi)
+  Future<void> updateTeamMemberInfo(String memberId, String name, String? pin, String? email) async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
     
     await _db.collection('users').doc(uid).collection('members').doc(memberId).update({
       'name': name,
       'profilePin': pin,
+      'email': email, // E-posta güncelleniyor
     });
   }
 
@@ -171,7 +170,6 @@ class DatabaseService {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
 
-    // 1. Önce kişinin üzerindeki görevleri bul ve havuza at (assignedMemberId = null yap)
     final tasksQuery = await _tasksRef.where('assignedMemberId', isEqualTo: memberId).get();
     
     WriteBatch batch = _db.batch();
@@ -180,26 +178,26 @@ class DatabaseService {
       batch.update(doc.reference, {'assignedMemberId': null});
     }
     
-    // 2. Kişiyi sil
     DocumentReference memberRef = _db.collection('users').doc(uid).collection('members').doc(memberId);
     batch.delete(memberRef);
 
-    // 3. Tüm işlemleri tek seferde uygula
     await batch.commit();
   }
   
-  // İlk kurulum (Admin profilini oluştur)
+  // İlk kurulum (Admin profilini oluştur) - DÜZELTİLDİ
   Future<void> createInitialAdminProfile(String name, String pin) async {
     String? uid = _auth.currentUser?.uid;
+    String? email = _auth.currentUser?.email; // Giriş yapan kullanıcının mailini al
+    
     if (uid == null) return;
     
     var members = await _db.collection('users').doc(uid).collection('members').get();
     if (members.docs.isEmpty) {
-      await addTeamMember(name, 'admin', pin); 
+      // 4. Parametre olarak email eklendi
+      await addTeamMember(name, 'admin', pin, email); 
     }
   }
 
-  // Üye Sayısını Kontrol Etmek İçin Koleksiyon Referansı
   CollectionReference getTeamMembersCollection() {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return _db.collection('users'); 
@@ -230,10 +228,8 @@ class DatabaseService {
   // --- YORUMLAR ---
 
   Future<void> addComment(String taskId, Comment comment) async {
-    // 1. Yorumu ekle
     await _tasksRef.doc(taskId).collection('comments').add(comment.toMap());
     
-    // 2. Görevin "lastCommentAt" alanını güncelle (Bildirim için)
     await _tasksRef.doc(taskId).update({
       'lastCommentAt': DateTime.now().toIso8601String(),
     });
@@ -252,12 +248,10 @@ class DatabaseService {
 
   // --- FCM TOKEN İŞLEMLERİ ---
   
-  // Cihazın FCM Token'ını kaydet
   Future<void> updateMemberToken(String memberId, String token) async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
     
-    // Üyenin dökümanına 'fcmToken' alanını ekle/güncelle
     await _db.collection('users').doc(uid).collection('members').doc(memberId).update({
       'fcmToken': token,
     });
@@ -265,20 +259,16 @@ class DatabaseService {
 
   // --- PREMIUM İŞLEMLERİ ---
 
-  // Hesabı Premium Yap
   Future<void> activatePremium() async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return;
 
-    // .update() yerine .set() ve merge:true kullanıyoruz.
-    // Böylece döküman yoksa oluşturur, varsa günceller.
     await _db.collection('users').doc(uid).set({
       'isPremium': true,
       'premiumSince': DateTime.now().toIso8601String(),
     }, SetOptions(merge: true));
   }
   
-  // Premium Durumunu Kontrol Et
   Future<bool> checkPremiumStatus() async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return false;
@@ -291,9 +281,7 @@ class DatabaseService {
     return false;
   }
 
-  // --- VERİ KURTARMA (ESKİ VERİLERİ SAHİPLEN) ---
-  // Bu fonksiyon, sahipsiz (eski) tüm görev ve projeleri
-  // şu an giriş yapmış olan kullanıcıya aktarır.
+  // --- VERİ KURTARMA ---
   Future<int> claimOldData() async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) return 0;
@@ -301,8 +289,7 @@ class DatabaseService {
     int updatedCount = 0;
     WriteBatch batch = _db.batch();
 
-    // 1. Sahipsiz Projeleri Bul
-    var projectsSnapshot = await _projectsRef.get(); // Hepsini çek
+    var projectsSnapshot = await _projectsRef.get(); 
     for (var doc in projectsSnapshot.docs) {
       var data = doc.data() as Map<String, dynamic>;
       if (!data.containsKey('ownerId') || data['ownerId'] == null) {
@@ -311,8 +298,7 @@ class DatabaseService {
       }
     }
 
-    // 2. Sahipsiz Görevleri Bul
-    var tasksSnapshot = await _tasksRef.get(); // Hepsini çek
+    var tasksSnapshot = await _tasksRef.get(); 
     for (var doc in tasksSnapshot.docs) {
       var data = doc.data() as Map<String, dynamic>;
       if (!data.containsKey('ownerId') || data['ownerId'] == null) {
@@ -321,7 +307,6 @@ class DatabaseService {
       }
     }
 
-    // 3. Değişiklikleri Kaydet
     if (updatedCount > 0) {
       await batch.commit();
     }
@@ -334,39 +319,56 @@ class DatabaseService {
     await _projectsRef.doc(project.id).set(project.toMap());
   }
 
-  // Görevi eski ID'siyle geri yükle
   Future<void> restoreTask(Task task) async {
     if (task.id == null) return;
     await _tasksRef.doc(task.id).set(task.toMap());
   }
 
   Future<void> moveTasksToProject(String oldProjectId, String newProjectId) async {
-    // 1. Eski projedeki görevleri bul
     var tasksSnapshot = await _tasksRef.where('projectId', isEqualTo: oldProjectId).get();
     
     WriteBatch batch = _db.batch();
 
-    // 2. Her görevin projectId'sini güncelle
     for (var doc in tasksSnapshot.docs) {
       batch.update(doc.reference, {'projectId': newProjectId});
     }
     
-    // 3. Kaydet
     await batch.commit();
   }
 
  Future<String?> uploadFileWeb(Uint8List bytes, String fileName) async {
     try {
-      // Benzersiz bir isim oluştur (Çakışmayı önler)
       String uniqueName = "${DateTime.now().millisecondsSinceEpoch}_$fileName";
       var ref = _storage.ref().child('uploads/$uniqueName');
       
-      // Web'de putFile değil, putData kullanılır
       var uploadTask = await ref.putData(bytes); 
       return await uploadTask.ref.getDownloadURL();
     } catch (e) {
       print("Web Upload Hatası: $e");
       return null;
     }
+  }
+
+  Future<void> updateTeamMemberPermissions(String memberId, bool canSeeAll, List<String> projectIds) async {
+    String? uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    await _db.collection('users').doc(uid).collection('members').doc(memberId).update({
+      'canSeeAllProjects': canSeeAll,
+      'allowedProjectIds': projectIds,
+    });
+  }
+
+  Future<void> updateTaskOrders(List<Task> tasks) async {
+    WriteBatch batch = _db.batch();
+
+    for (var task in tasks) {
+      if (task.id != null) {
+        DocumentReference docRef = _tasksRef.doc(task.id);
+        batch.update(docRef, {'order': task.order});
+      }
+    }
+
+    await batch.commit();
   }
 }

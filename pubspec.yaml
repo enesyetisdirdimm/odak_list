@@ -10,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
 
+  mailer: ^6.0.0  
+
   # --- UYUMLU PAKET LİSTESİ ---
   
   # sqflite 2.3.0 yerine 2.3.2 sürümünü kullanıyoruz (Daha kararlı)

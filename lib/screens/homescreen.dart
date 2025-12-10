@@ -18,7 +18,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 // Sıralama seçenekleri
-enum SortOption { newestFirst, dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
+enum SortOption { manual, newestFirst, dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
 
 class HomeScreen extends StatefulWidget {
   final DatabaseService dbService;
@@ -33,7 +33,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _searchQuery = '';
   
   // Varsayılan sıralama: En Yeni En Üstte
-  SortOption _currentSortOption = SortOption.newestFirst;
+  //SortOption _currentSortOption = SortOption.newestFirst;
+  SortOption _currentSortOption = SortOption.manual;
   
   // "Bana Ait" Filtresi
   bool _showOnlyMyTasks = false; 
@@ -155,14 +156,13 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Task> _processTasks(List<Task> allTasks, TaskProvider provider) {
     List<Task> filtered;
     
-    // 1. Proje Filtresi
+    // 1. Proje ve Kişi Filtreleri
     if (_selectedProjectId != null) {
       filtered = allTasks.where((t) => t.projectId == _selectedProjectId).toList();
     } else {
-      filtered = allTasks; 
+      filtered = List.from(allTasks); 
     }
 
-    // 2. "Bana Ait" Filtresi
     if (_showOnlyMyTasks) {
       final myId = provider.currentMember?.id;
       if (myId != null) {
@@ -170,40 +170,46 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // 3. Arama Filtresi
+    // 2. Arama Filtresi
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((t) {
         final query = _searchQuery.toLowerCase();
-        final inTitle = t.title.toLowerCase().contains(query);
-        final inTags = t.tags.any((tag) => tag.toLowerCase().contains(query));
-        return inTitle || inTags;
+        return t.title.toLowerCase().contains(query) || t.tags.any((tag) => tag.toLowerCase().contains(query));
       }).toList();
     }
 
-    // 4. Sıralama
+    // 3. SIRALAMA MANTIĞI (ÖNEMLİ KISIM)
     filtered.sort((a, b) {
       switch (_currentSortOption) {
+        case SortOption.manual:
+          // Manuelde ORDER numarasına göre (Küçükten büyüğe)
+          // Eğer orderlar eşitse (eski veri), oluşturulma tarihine bak
+          int res = a.order.compareTo(b.order);
+          if (res == 0) {
+             return (a.createdAt ?? DateTime.now()).compareTo(b.createdAt ?? DateTime.now());
+          }
+          return res;
+
         case SortOption.newestFirst:
-          // En yeni tarihli (b) en başa (a)
-          // createdAt null ise eski kabul edip sona atıyoruz
+          // En Yenide TARİHE göre (Yeniler en üste)
           return (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000));
-          
+
         case SortOption.dateAsc:
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return a.dueDate!.compareTo(b.dueDate!);
-          
+
         case SortOption.dateDesc:
           if (a.dueDate == null) return 1;
           if (b.dueDate == null) return -1;
           return b.dueDate!.compareTo(a.dueDate!);
-          
+
         case SortOption.priorityDesc:
           return b.priority.compareTo(a.priority);
-          
+
         case SortOption.priorityAsc:
           return a.priority.compareTo(b.priority);
-          
+
         case SortOption.titleAsc:
           return a.title.compareTo(b.title);
       }
@@ -226,6 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: EdgeInsets.all(16.0),
                 child: Text("Sıralama Ölçütü", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
+              _buildSortTile("Manuel (Sürükle & Bırak)", SortOption.manual, Icons.drag_handle, themeProvider),
               _buildSortTile("En Yeni Eklenen (Varsayılan)", SortOption.newestFirst, Icons.new_releases, themeProvider),
               _buildSortTile("Tarih (En Yakın Önce)", SortOption.dateAsc, Icons.calendar_today, themeProvider),
               _buildSortTile("Tarih (En Uzak Önce)", SortOption.dateDesc, Icons.event_repeat, themeProvider),
@@ -302,21 +309,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToDetail([Task? task]) async {
-    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
-    
-    if (taskProvider.projects.isEmpty) {
-      if (taskProvider.isAdmin) {
-         _showAddProjectDialog(taskProvider);
-      } else {
-         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Henüz hiç proje yok. Yöneticinize başvurun.")));
-      }
-      return;
+  final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+  
+  if (taskProvider.projects.isEmpty) {
+    if (taskProvider.isAdmin) {
+       _showAddProjectDialog(taskProvider);
+    } else {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Henüz hiç proje yok. Yöneticinize başvurun.")));
     }
-
-    String defaultProjectId = _selectedProjectId ?? taskProvider.projects.first.id!;
-    
-    await Navigator.push(context, MaterialPageRoute(builder: (context) => TaskDetailScreen(task: task ?? Task(title: '', projectId: defaultProjectId), dbService: widget.dbService)));
+    return;
   }
+
+  String defaultProjectId = _selectedProjectId ?? taskProvider.projects.first.id!;
+  
+  // --- DÜZELTME BURADA BAŞLIYOR ---
+  // Eğer var olan bir görevi açmıyorsak (yani yeni görevse), creatorId'yi ekle
+  String? currentUserId = taskProvider.currentMember?.id;
+
+  await Navigator.push(
+    context, 
+    MaterialPageRoute(
+      builder: (context) => TaskDetailScreen(
+        task: task ?? Task(
+          title: '', 
+          projectId: defaultProjectId,
+          creatorId: currentUserId // <--- BU SATIRI EKLE
+        ), 
+        dbService: widget.dbService
+      )
+    )
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -586,29 +609,94 @@ class _HomeScreenState extends State<HomeScreen> {
             child: taskProvider.isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : activeTasksList.isEmpty && completedTasksList.isEmpty
-                    ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.rocket_launch, size: 80, color: themeProvider.secondaryColor.withOpacity(0.5)), 
-                        const SizedBox(height: 20), 
-                        Text(_showOnlyMyTasks ? "Sana atanmış görev yok." : "Hiç görev yok!", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor)), 
-                        const SizedBox(height: 8), 
-                        Text(_showOnlyMyTasks ? "Rahatına bakabilirsin 😎" : "Yeni bir başlangıç yap.", style: TextStyle(color: subTextColor)), 
-                      ]))
-                    : ListView(
-                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
-                        children: [
-                          if (activeTasksList.isNotEmpty) ...[
-                            Text("YAPILACAKLAR (${activeTasksList.length})", style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14, letterSpacing: 1.2)),
-                            const SizedBox(height: 10),
-                            ...activeTasksList.map((task) => _buildDismissibleTask(task, themeProvider, taskProvider)),
-                          ],
-                          if (activeTasksList.isNotEmpty && completedTasksList.isNotEmpty) const SizedBox(height: 24),
-                          if (completedTasksList.isNotEmpty) ...[
-                             Text("TAMAMLANANLAR (${completedTasksList.length})", style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14, letterSpacing: 1.2)),
-                            const SizedBox(height: 10),
-                            ...completedTasksList.map((task) => Opacity(opacity: 0.6, child: _buildDismissibleTask(task, themeProvider, taskProvider))),
-                          ],
-                        ],
-                      ),
+                    ? Center(child: Text("Görev Yok", style: TextStyle(color: subTextColor)))
+                    : _currentSortOption == SortOption.manual && activeTasksList.isNotEmpty
+                        // --- MANUEL MOD (SÜRÜKLE BIRAK AKTİF) ---
+                        ? ReorderableListView.builder(
+                            padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+                            // Aktif görevler + (varsa) Tamamlananlar başlığı için 1 yer
+                            itemCount: activeTasksList.length + (completedTasksList.isNotEmpty ? 1 : 0),
+                            
+                            onReorder: (oldIndex, newIndex) {
+                              // GÜVENLİK: Eğer tamamlananlar kısmına (listenin sonuna) sürüklenmeye çalışılırsa iptal et
+                              if (newIndex > activeTasksList.length) {
+                                newIndex = activeTasksList.length;
+                              }
+                              
+                              // 1. İndeks kaymasını düzelt (Flutter standardı)
+                              if (oldIndex < newIndex) {
+                                newIndex -= 1;
+                              }
+
+                              // 2. Listeyi güncelle (Görsel olarak yer değiştir)
+                              final Task item = activeTasksList.removeAt(oldIndex);
+                              activeTasksList.insert(newIndex, item);
+
+                              // 3. Yeni sıralamaya göre 'order' numaralarını baştan ver (0, 1, 2...)
+                              for (int i = 0; i < activeTasksList.length; i++) {
+                                activeTasksList[i].order = i;
+                              }
+
+                              // 4. Güncellenmiş listeyi Provider'a gönderip kaydet
+                              taskProvider.updateOrderedList(activeTasksList);
+                            },
+                            
+                            proxyDecorator: (child, index, animation) {
+                              return Material(
+                                elevation: 5,
+                                color: Colors.transparent,
+                                shadowColor: Colors.black.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(16),
+                                child: child,
+                              );
+                            },
+                            
+                            itemBuilder: (context, index) {
+                              // A. AKTİF GÖREVLER (SÜRÜKLENEBİLİR)
+                              if (index < activeTasksList.length) {
+                                final task = activeTasksList[index];
+                                return Container(
+                                  key: ValueKey(task.id), // KEY ZORUNLU
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  child: _buildDismissibleTask(task, themeProvider, taskProvider),
+                                );
+                              } 
+                              // B. TAMAMLANANLAR BAŞLIĞI VE LİSTESİ (SÜRÜKLENEMEZ)
+                              else {
+                                return Column(
+                                  key: const ValueKey('completed_section'),
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 24),
+                                    Text("TAMAMLANANLAR (${completedTasksList.length})", style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14, letterSpacing: 1.2)),
+                                    const SizedBox(height: 10),
+                                    ...completedTasksList.map((task) => Opacity(opacity: 0.6, child: _buildDismissibleTask(task, themeProvider, taskProvider))),
+                                  ],
+                                );
+                              }
+                            },
+                          )
+                        
+                        // --- DİĞER MODLAR (STANDART LİSTE - SÜRÜKLEME YOK) ---
+                        : ListView(
+                            padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+                            children: [
+                              if (activeTasksList.isNotEmpty) ...[
+                                Text("YAPILACAKLAR (${activeTasksList.length})", style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14, letterSpacing: 1.2)),
+                                const SizedBox(height: 10),
+                                ...activeTasksList.map((task) => _buildDismissibleTask(task, themeProvider, taskProvider)),
+                              ],
+                              
+                              if (activeTasksList.isNotEmpty && completedTasksList.isNotEmpty) 
+                                const SizedBox(height: 24),
+                              
+                              if (completedTasksList.isNotEmpty) ...[
+                                 Text("TAMAMLANANLAR (${completedTasksList.length})", style: TextStyle(fontWeight: FontWeight.bold, color: subTextColor, fontSize: 14, letterSpacing: 1.2)),
+                                const SizedBox(height: 10),
+                                ...completedTasksList.map((task) => Opacity(opacity: 0.6, child: _buildDismissibleTask(task, themeProvider, taskProvider))),
+                              ],
+                            ],
+                          ),
           ),
         ],
       ),

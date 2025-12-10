@@ -17,6 +17,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:odak_list/models/team_member.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:odak_list/services/email_service.dart';
 
 class TaskProvider extends ChangeNotifier {
 
@@ -30,7 +31,9 @@ class TaskProvider extends ChangeNotifier {
   List<Task> _tasks = [];
   List<Project> _projects = [];
   List<TeamMember> _teamMembers = []; 
-  
+
+  List<Project> _allProjectsRaw = []; // Veritabanından gelen TÜM projeler (Ham veri)
+
   // Uygulama açılışında profil kontrolü bitene kadar true kalır
   bool _isLoading = true;
   
@@ -118,12 +121,23 @@ class TaskProvider extends ChangeNotifier {
     notifyListeners();
   }
   
-  String? getMemberName(String? memberId) {
-    if (memberId == null) return null;
+ String? getMemberName(String? id) {
+    if (id == null) return null;
+
+    // --- EKLENECEK KISIM BAŞLANGICI ---
+    // Eğer sorulan ID benim ID'mse, listede aramaya gerek yok, direkt ismimi döndür.
+    if (currentMember != null && id == currentMember!.id) {
+      return currentMember!.name; 
+    }
+    // --- EKLENECEK KISIM SONU ---
+
+    // Eski kodlar aynen kalıyor...
     try {
-      return _teamMembers.firstWhere((m) => m.id == memberId).name;
+      // Listede ara (Diğer üyeler için)
+      final member = _teamMembers.firstWhere((m) => m.id == id);
+      return member.name;
     } catch (e) {
-      return null;
+      return null; // Bulunamazsa null döner, arayüzde "Anonim" yazar
     }
   }
 
@@ -176,6 +190,23 @@ class TaskProvider extends ChangeNotifier {
           }
         }
       }
+
+      if (_currentMember != null) {
+        try {
+          // Listeden benim güncel halimi bul (Firestore'dan yeni gelen veri)
+          final updatedMe = _teamMembers.firstWhere((m) => m.id == _currentMember!.id);
+          
+          // Hafızadaki kullanıcıyı güncelle (Yetkiler, İsim, Rol vb.)
+          _currentMember = updatedMe;
+          
+          // !!! EN ÖNEMLİSİ: Yetkiler değiştiği için filtreyi HEMEN tekrar çalıştır !!!
+          _applyProjectFilter(); 
+          
+        } catch (e) {
+          // Eğer kullanıcı veritabanından silindiyse çıkış yap
+          logoutMember();
+        }
+      }
       
       // Profil kontrolü bitti, ekranı açabiliriz
       _isLoading = false;
@@ -184,11 +215,11 @@ class TaskProvider extends ChangeNotifier {
 
     // 2. Projeleri Dinle
     _projectsSubscription = _dbService.getProjectsStream().listen((projectsData) {
-      _projects = projectsData;
+      _allProjectsRaw = projectsData; // Önce ham veriyi sakla
+      _applyProjectFilter();          // Sonra filtrele
       _calculateStats();
       notifyListeners();
     });
-
     // 3. Görevleri Dinle ve BİLDİRİMLERİ KUR
     _tasksSubscription = _dbService.getTasksStream().listen((tasksData) {
       _tasks = tasksData;
@@ -202,6 +233,31 @@ class TaskProvider extends ChangeNotifier {
 
       notifyListeners();
     });
+  }
+
+  void _applyProjectFilter() {
+    if (_currentMember == null) {
+      _projects = [];
+      return;
+    }
+
+    // GÜNCELLEME: Sadece "canSeeAllProjects" açıksa veya Adminse AMA kısıtlama yoksa
+    // Eğer adminlerin de kısıtlanabilmesini istiyorsan '|| _currentMember!.role == 'admin'' kısmını silebilirsin.
+    // Ancak standart davranış: Admin her şeyi görür, Editörler kısıtlanır.
+    
+    // Admin olsa bile "Tümünü Gör" kapalıysa kısıtlansın istiyorsan bu satırı kullan:
+    bool hasFullAccess = _currentMember!.canSeeAllProjects; 
+    
+    // Yoksa "Admin her zaman her şeyi görür" diyorsan bunu kullan (Eski halin):
+    // bool hasFullAccess = _currentMember!.role == 'admin' || _currentMember!.canSeeAllProjects;
+
+    if (hasFullAccess) {
+      _projects = List.from(_allProjectsRaw);
+    } else {
+      _projects = _allProjectsRaw.where((project) {
+        return _currentMember!.allowedProjectIds.contains(project.id);
+      }).toList();
+    }
   }
 
   // Tüm görevler için bildirimleri tazele
@@ -340,33 +396,66 @@ class TaskProvider extends ChangeNotifier {
 
   // --- GÖREV İŞLEMLERİ (CRUD) ---
   Future<void> addTask(Task task) async {
-    // ESKİSİ: task.creatorId = user.uid; (Bunu değiştiriyoruz)
+    // ---------------------------------------------------------
+    // DÜZELTME BURADA YAPILDI:
+    // Eski kod (FirebaseAuth...) silindi.
+    // Onun yerine, ekrandan ID gelmediyse senin profil ID'ni atayan kodu yazdık.
+    // ---------------------------------------------------------
     
-    // YENİSİ: Görevi oluşturan kişi, o anki seçili Profil (Member) ID'sidir.
-    // Cloud/Storage işlemleri için 'ownerId' zaten DatabaseService'de Auth UID olarak ayarlanıyor.
-    if (_currentMember != null) {
-      task.creatorId = _currentMember!.id;
-    } else {
-      // Eğer profil seçili değilse (ki olmalı), yedek olarak Auth UID koy.
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) task.creatorId = user.uid;
+    // Eğer ekrandan creatorId boş geldiyse (güvenlik önlemi), 
+    // şu anki profilinin ID'sini (yxAGC...) kullan.
+    if (task.creatorId == null && _currentMember != null) {
+       task.creatorId = _currentMember!.id;
     }
     
-    // Oluşturulma zamanı
+    // NOT: Artık task.creatorId'yi bozmuyoruz, olduğu gibi kalıyor!
+    // ---------------------------------------------------------
+
     task.createdAt = DateTime.now();
-    
-    // Veritabanına kaydet (ownerId burada otomatik ekleniyor)
+
+    // --- SIRA NUMARASI AYARLAMA (Aynen kalıyor) ---
+    if (_tasks.isNotEmpty) {
+      int maxOrder = _tasks.fold(0, (max, t) => t.order > max ? t.order : max);
+      task.order = maxOrder + 1;
+    } else {
+      task.order = 0;
+    }
+    // ----------------------------------------
+
     Task createdTask = await _dbService.createTask(task);
     
-    // Log ekle
+    // Listenin kendisine de ekle ki ekran yenilenmeden görünsün
+    _tasks.add(createdTask); 
+    notifyListeners(); // Arayüzü güncelle
+
+    // ... (Log ve Mail kodları AYNEN DEVAM EDİYOR) ...
     if (_currentMember != null) {
-      await _dbService.addActivityLog(
-        createdTask.id!, 
-        _currentMember!.name, 
-        "Görevi oluşturdu."
-      );
+      await _dbService.addActivityLog(createdTask.id!, _currentMember!.name, "Görevi oluşturdu.");
+
+      if (task.assignedMemberId != null) {
+        try {
+          final assignee = _teamMembers.firstWhere(
+            (m) => m.id == task.assignedMemberId, 
+            orElse: () => TeamMember(id: '', name: '', role: '')
+          );
+          
+          String myEmail = _currentMember!.email ?? "";
+          
+          if (assignee.email != null && assignee.email!.isNotEmpty && assignee.id != _currentMember!.id) {
+            EmailService.sendTaskAssignmentEmail(
+              toEmail: assignee.email!,
+              toName: assignee.name,
+              ccEmail: myEmail,
+              taskTitle: task.title,
+              assignerName: _currentMember!.name,
+            );
+          }
+        } catch (e) {
+          print("Mail gönderim hatası: $e");
+        }
+      }
     }
-  }
+}
   Future<void> updateTask(Task task) async {
     await _dbService.updateTask(task);
   }
@@ -449,6 +538,7 @@ bool canCompleteTask(Task task) {
 
     if (isNowDone) {
       task.completedBy = _currentMember?.name; 
+      _sendCompletionEmails(task);
     } else {
       task.completedBy = null;
     }
@@ -462,6 +552,52 @@ bool canCompleteTask(Task task) {
            isNowDone ? "Görevi tamamladı. ✅" : "Görevi tekrar açtı."
          );
       }
+    }
+  }
+
+  Future<void> _sendCompletionEmails(Task task) async {
+    try {
+      // 1. Görevi Oluşturan Kişinin Mailini Bul (Assigner)
+      String assignerEmail = '';
+      if (task.creatorId != null) {
+        // TeamMembers listesinden ID eşleşen kişiyi buluyoruz
+        final creator = _teamMembers.firstWhere(
+          (m) => m.id == task.creatorId,
+          orElse: () => TeamMember(id: '', name: '', role: '')
+        );
+        assignerEmail = creator.email ?? ''; 
+      }
+
+      // 2. Görevi Yapan Kişinin Mailini Bul (Assignee)
+      String assigneeEmail = '';
+      if (task.assignedMemberId != null) {
+        final assignee = _teamMembers.firstWhere(
+          (m) => m.id == task.assignedMemberId,
+          orElse: () => TeamMember(id: '', name: '', role: '')
+        );
+        assigneeEmail = assignee.email ?? '';
+      }
+
+      // 3. Görevi Bitiren Kişi (Şu anki kullanıcı)
+      String completerEmail = _currentMember?.email ?? '';
+
+      // Eğer mail adresleri bulunamazsa (boşsa), servis hata verebilir.
+      // Bu yüzden sadece geçerli mail varsa gönderim yapmayı deneyebiliriz 
+      // veya boş olsa bile servise gönderip servisin (try-catch) yakalamasını sağlarız.
+      // Yeni yazdığımız serviste bu alanlar required olduğu için dolu göndermeliyiz.
+      
+      // Eğer kritik bir mail eksikse işlem yapma (Opsiyonel güvenlik)
+      if (completerEmail.isEmpty) return; 
+
+      await EmailService.sendTaskCompletionEmail(
+        taskTitle: task.title,
+        assignerEmail: assignerEmail.isNotEmpty ? assignerEmail : completerEmail, // Boşsa bitirene gitsin
+        assigneeEmail: assigneeEmail.isNotEmpty ? assigneeEmail : completerEmail, // Boşsa bitirene gitsin
+        completerEmail: completerEmail,
+      );
+      
+    } catch (e) {
+      print("Tamamlama maili hatası: $e");
     }
   }
 
@@ -529,5 +665,25 @@ bool canCompleteTask(Task task) {
     
     // 2. Eski projeyi sil (Artık içi boş olduğu için güvenli)
     await _dbService.deleteProject(projectId);
+  }
+
+  Future<void> updateOrderedList(List<Task> reorderedList) async {
+    // 1. Gelen listeye göre global listeyi güncelle
+    for (var task in reorderedList) {
+      // Global listede bu görevi bul ve sırasını güncelle
+      int index = _tasks.indexWhere((t) => t.id == task.id);
+      if (index != -1) {
+        _tasks[index].order = task.order;
+      }
+    }
+
+    // 2. Global listeyi yeni order numaralarına göre yeniden diz (Hata olmasın diye)
+    _tasks.sort((a, b) => a.order.compareTo(b.order));
+
+    // 3. Ekranı hemen güncelle (Kullanıcı bekemesin)
+    notifyListeners();
+
+    // 4. Veritabanına toplu güncelleme gönder (Arka planda)
+    await _dbService.updateTaskOrders(reorderedList);
   }
 }

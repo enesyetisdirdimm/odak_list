@@ -54,7 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(labelText: "Yeni Ad Soyad", border: OutlineInputBorder()),
-          maxLength: 15, // Giriş yaparken de sınır koyalım
+          maxLength: 15, 
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
@@ -74,7 +74,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   await _dbService.updateTeamMemberInfo(
                     currentMember.id, 
                     newName, 
-                    currentMember.profilePin
+                    currentMember.profilePin,
+                    currentMember.email // <--- DÜZELTME BURADA: 4. Parametre (Email) eklendi
                   );
                   currentMember.name = newName; 
                   taskProvider.selectMember(currentMember);
@@ -222,7 +223,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // --- PROFİL KARTI ---W
+          // --- PROFİL KARTI ---
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
