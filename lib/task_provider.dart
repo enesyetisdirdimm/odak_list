@@ -441,7 +441,7 @@ class TaskProvider extends ChangeNotifier {
           
           String myEmail = _currentMember!.email ?? "";
           
-          if (assignee.email != null && assignee.email!.isNotEmpty && assignee.id != _currentMember!.id) {
+          if (assignee.email != null && assignee.email!.isNotEmpty /*&& assignee.id != _currentMember!.id*/) {
             EmailService.sendTaskAssignmentEmail(
               toEmail: assignee.email!,
               toName: assignee.name,

@@ -11,6 +11,11 @@ dependencies:
     sdk: flutter
 
   mailer: ^6.0.0  
+  pdf: ^3.10.0
+  excel: ^4.0.0
+  #printing: ^5.13.1
+  open_filex: ^4.3.2
+  universal_html: ^2.2.4 # Web indirmesi için
 
   # --- UYUMLU PAKET LİSTESİ ---
   
@@ -42,6 +47,7 @@ dependencies:
   home_widget: ^0.8.1
   # Wakelock'u güncelledik (Eskiden 1.1.2 idi, 1.2.0 yaptık)
   wakelock_plus: 1.2.0
+  
 
   firebase_core: ^2.27.0  # Firebase Beyni
   firebase_auth: ^4.17.8  # Giriş/Kayıt işlemleri
@@ -76,6 +82,8 @@ flutter:
 
   assets:
     - assets/sounds/
+    - assets/fonts/
+    - assets/fonts/Roboto-Regular.ttf
     - assets/
 
 flutter_launcher_icons:

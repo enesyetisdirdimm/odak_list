@@ -21,6 +21,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:odak_list/screens/profile_select_screen.dart';
 import 'package:odak_list/services/purchase_api.dart'; 
 import 'package:odak_list/screens/verify_email_screen.dart'; 
+import 'package:intl/date_symbol_data_local.dart';
 
 // Yerel Zaman Dilimi Ayarı (Web Uyumlu)
 Future<void> _configureLocalTimeZone() async {
@@ -71,6 +72,7 @@ void main() async {
       // MOBİL İÇİN OTOMATİK BAŞLATMA
       await Firebase.initializeApp();
     }
+    
 
     // DÜZELTME: Satın alma servisini WEB'de çalıştırma (Hata verdirir)
     if (!kIsWeb) {
@@ -79,7 +81,7 @@ void main() async {
   } catch (e) {
     print("Başlatma hatası (Firebase/Purchase): $e");
   }
-  
+  await initializeDateFormatting('tr_TR', null);
   final dbService = DatabaseService();
   
   // 2. Onboarding Kontrolü

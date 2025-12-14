@@ -1,5 +1,6 @@
 // Dosya: lib/screens/homescreen.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:odak_list/models/project.dart';
@@ -16,6 +17,14 @@ import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:io'; // Dosya işlemleri için
+import 'package:excel/excel.dart' hide Border;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:open_filex/open_filex.dart'; // Dosyayı açmak için
+import 'package:universal_html/html.dart' as html;
 
 // Sıralama seçenekleri
 enum SortOption { manual, newestFirst, dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
@@ -427,6 +436,30 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
+
+                      GestureDetector(
+  onTap: _exportProjectToPdf,
+  child: Container(
+    padding: const EdgeInsets.all(8), 
+    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle), 
+    child: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 22)
+  ),
+),
+
+const SizedBox(width: 8), // Araya boşluk
+
+// --- YENİ EXCEL BUTONU ---
+GestureDetector(
+  onTap: _exportProjectToExcel, // Excel fonksiyonunu çağır
+  child: Container(
+    padding: const EdgeInsets.all(8), 
+    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle), 
+    // Excel için yeşilimsi bir ikon veya düz beyaz (Header rengine göre)
+    child: const Icon(Icons.table_view, color: Colors.white, size: 22)
+  ),
+),
+
+
                       const SizedBox(width: 10),
                       GestureDetector(
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())),
@@ -799,5 +832,256 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _exportProjectToExcel() async {
+    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+    
+    // 1. Excel Dosyası Hazırla
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Görev Listesi'];
+    excel.delete('Sheet1'); // Varsayılan boş sayfayı sil
+
+    // Başlıklar
+    List<String> headers = ['Durum', 'Görev Adı', 'Atanan Kişi', 'Tarih', 'Öncelik'];
+    sheetObject.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+    // 2. Verileri Filtrele ve Sırala
+    List<Task> exportTasks = [];
+    String fileNamePrefix = "Rapor";
+
+    if (_selectedProjectId != null) {
+      exportTasks = taskProvider.tasks.where((t) => t.projectId == _selectedProjectId).toList();
+      try {
+        fileNamePrefix = taskProvider.projects.firstWhere((p) => p.id == _selectedProjectId).title;
+      } catch (_) {}
+    } else {
+      if (_showOnlyMyTasks) {
+        final myId = taskProvider.currentMember?.id;
+        exportTasks = taskProvider.tasks.where((t) => t.assignedMemberId == myId).toList();
+        fileNamePrefix = "Gorevlerim";
+      } else {
+        exportTasks = List.from(taskProvider.tasks);
+        fileNamePrefix = "Tum_Gorevler";
+      }
+    }
+
+    // Tarihe Göre Sırala (Eskiden Yeniye)
+    exportTasks.sort((a, b) {
+      if (a.dueDate == null && b.dueDate == null) return 0;
+      if (a.dueDate == null) return 1;
+      if (b.dueDate == null) return -1;
+      return a.dueDate!.compareTo(b.dueDate!);
+    });
+
+    // 3. Verileri Yaz
+    for (var task in exportTasks) {
+      String status = task.isDone ? "Tamamlandı" : "Bekliyor";
+      String assignee = task.assignedMemberId != null 
+          ? (taskProvider.getMemberName(task.assignedMemberId) ?? "-") 
+          : "Havuz";
+      String date = task.dueDate != null 
+          ? "${task.dueDate!.day}.${task.dueDate!.month}.${task.dueDate!.year}" 
+          : "-";
+      String priority = task.priority == 3 ? "Yüksek" : (task.priority == 2 ? "Orta" : "Düşük");
+
+      sheetObject.appendRow([
+        TextCellValue(status),
+        TextCellValue(task.title),
+        TextCellValue(assignee),
+        TextCellValue(date),
+        TextCellValue(priority),
+      ]);
+    }
+
+    // 4. MOBİL İÇİN KAYDET VE PAYLAŞ
+    // Excel verisini byte'a çevir
+    var fileBytes = excel.save();
+
+    if (fileBytes != null) {
+      // Telefonun geçici klasörünü bul
+      final directory = await getTemporaryDirectory();
+      final path = "${directory.path}/${fileNamePrefix}_Rapor.xlsx";
+      
+      // Dosyayı oluştur ve yaz
+      File(path)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(fileBytes);
+
+      // Paylaşım menüsünü aç
+      await Share.shareXFiles([XFile(path)], text: 'Excel Raporu');
+    }
+  }
+
+  Future<void> _exportProjectToPdf() async {
+    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+    final pdf = pw.Document();
+
+    // 1. FONT YÜKLEME (Web ile aynı mantık)
+    pw.Font ttf;
+    try {
+      final fontData = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
+      ttf = pw.Font.ttf(fontData);
+    } catch (e) {
+      print("Font hatası: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Hata: Font dosyası yüklenemedi."))
+      );
+      return;
+    }
+
+    // 2. VERİLERİ HAZIRLA (Mobil Filtreleme Mantığı)
+    String projectTitle = "Genel Rapor";
+    List<Task> exportTasks = [];
+    
+    if (_selectedProjectId != null) {
+      // Belirli bir proje seçiliyse
+      exportTasks = taskProvider.tasks.where((t) => t.projectId == _selectedProjectId).toList();
+      try {
+        projectTitle = taskProvider.projects.firstWhere((p) => p.id == _selectedProjectId).title;
+      } catch (_) {
+        projectTitle = "Proje Raporu";
+      }
+    } else {
+      // Proje seçili değilse (Tümü veya Bana Atananlar)
+      if (_showOnlyMyTasks) {
+        final myId = taskProvider.currentMember?.id;
+        exportTasks = taskProvider.tasks.where((t) => t.assignedMemberId == myId).toList();
+        projectTitle = "Bana Atanan Görevler";
+      } else {
+        exportTasks = List.from(taskProvider.tasks);
+        projectTitle = "Tüm Görevler";
+      }
+    }
+
+    // 3. SIRALAMA (Tarihe Göre)
+    exportTasks.sort((a, b) {
+      if (a.dueDate == null && b.dueDate == null) return 0;
+      if (a.dueDate == null) return 1;
+      if (b.dueDate == null) return -1;
+      return a.dueDate!.compareTo(b.dueDate!);
+    });
+
+    // 4. PDF TASARIMI
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(20), // Kenar boşlukları
+        theme: pw.ThemeData.withFont(base: ttf, bold: ttf),
+        
+        build: (pw.Context context) {
+          return [
+            // BAŞLIK KISMI
+            pw.Header(
+              level: 0,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(projectTitle, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text("Tarih: ${DateTime.now().day}.${DateTime.now().month}.${DateTime.now().year}", style: const pw.TextStyle(fontSize: 10)),
+                      pw.Text("Toplam: ${exportTasks.length} Görev", style: const pw.TextStyle(fontSize: 10)),
+                    ]
+                  )
+                ]
+              )
+            ),
+            pw.SizedBox(height: 10),
+            
+            // TABLO KISMI
+            pw.Table.fromTextArray(
+              context: context,
+              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+              
+              // Başlık Stili (Koyu Renk)
+              headerStyle: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+              headerHeight: 25,
+              
+              // Hücre Hizalamaları
+              cellAlignments: {
+                0: pw.Alignment.centerLeft, // Durum
+                1: pw.Alignment.centerLeft, // Görev Adı
+                2: pw.Alignment.center,     // Atanan
+                3: pw.Alignment.center,     // Tarih
+              },
+              
+              // Yazı Boyutu ve Boşluklar
+              cellStyle: const pw.TextStyle(fontSize: 9),
+              cellPadding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+
+              // Sütun Genişlikleri (Düzenli Görünüm İçin Kritik)
+              columnWidths: {
+                0: const pw.FixedColumnWidth(60), // Durum
+                1: const pw.FlexColumnWidth(1),   // Görev Adı (Esnek - Kalan yeri kaplar)
+                2: const pw.FixedColumnWidth(50), // Atanan
+                3: const pw.FixedColumnWidth(40), // Tarih
+              },
+
+              headers: <String>['Durum', 'Görev Açıklaması', 'Atanan', 'Tarih'],
+              data: exportTasks.map((task) {
+                return [
+                  task.isDone ? "Tamamlandı" : "Bekliyor",
+                  task.title, // Uzun metinler artık alt satıra düzgün geçecek
+                  task.assignedMemberId != null 
+                      ? (taskProvider.getMemberName(task.assignedMemberId) ?? "-") 
+                      : "Havuz",
+                  task.dueDate != null ? "${task.dueDate!.day}.${task.dueDate!.month}" : "-"
+                ];
+              }).toList(),
+            ),
+          ];
+        },
+      ),
+    );
+
+    // MOBİL İÇİN PAYLAŞIM / YAZDIRMA EKRANINI AÇ
+    final bytes = await pdf.save(); // PDF'i byte verisine çevir
+
+    if (kIsWeb) {
+      // ------------------------------------------------
+      // WEB TARAFINDA İNDİRME
+      // ------------------------------------------------
+      final blob = html.Blob([bytes], 'application/pdf');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement()
+        ..href = url
+        ..style.display = 'none'
+        ..download = '${projectTitle}_Rapor.pdf';
+      html.document.body?.children.add(anchor);
+      anchor.click();
+      html.document.body?.children.remove(anchor);
+      html.Url.revokeObjectUrl(url);
+    } else {
+      // ------------------------------------------------
+      // MOBİL TARAFINDA KAYDET VE PAYLAŞ
+      // ------------------------------------------------
+      try {
+        // 1. Geçici klasörü bul
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/${projectTitle}_Rapor.pdf');
+
+        // 2. Dosyayı yaz
+        await file.writeAsBytes(bytes);
+
+        // 3. Paylaşım Menüsünü Aç (WhatsApp, Mail, Drive vb.)
+        // share_plus paketi kullanılır
+        await Share.shareXFiles(
+          [XFile(file.path)], 
+          text: '$projectTitle Raporu'
+        );
+        
+        // Alternatif: Direkt dosyayı açmak istersen (open_filex paketi ile):
+        // await OpenFilex.open(file.path);
+        
+      } catch (e) {
+        print("Dosya kaydetme hatası: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Hata oluştu: $e"))
+        );
+      }
+    }
   }
 }

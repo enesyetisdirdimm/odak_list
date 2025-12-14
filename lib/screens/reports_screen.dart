@@ -309,15 +309,32 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // B. DETAYLI PERSONEL LİSTESİ
-  Widget _buildDetailedTeamStats(TaskProvider provider, bool isDark, Color cardColor, Color textColor, Color subTextColor) {
+ Widget _buildDetailedTeamStats(TaskProvider provider, bool isDark, Color cardColor, Color textColor, Color subTextColor) {
     List<TeamMember> members = List.from(provider.teamMembers);
     members.add(TeamMember(id: "unassigned", name: "Ortak Havuz", role: "system"));
+    
+    // Ekran genişliğini alıyoruz
+    double width = MediaQuery.of(context).size.width;
+    
+    // Genişliğe göre kaç sütun olacağına karar veriyoruz
+    int crossAxisCount = 1;
+    if (width > 1200) {
+      crossAxisCount = 3; // Geniş Web: 3 yan yana
+    } else if (width > 800) {
+      crossAxisCount = 2; // Tablet / Dar Web: 2 yan yana
+    }
+    // Telefon: 1 (Alt alta)
 
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+    return GridView.builder(
+      shrinkWrap: true, // Scroll hatasını önler
+      physics: const NeverScrollableScrollPhysics(), // Ana sayfanın scroll'unu kullanır
       itemCount: members.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 10),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        childAspectRatio: crossAxisCount == 1 ? 2.2 : 1.8, // Kartın en/boy oranı (Kartın sığması için önemli)
+        crossAxisSpacing: 15, // Yatay boşluk
+        mainAxisSpacing: 15,  // Dikey boşluk
+      ),
       itemBuilder: (context, index) {
         final member = members[index];
         final isHavuz = member.id == "unassigned";
@@ -341,83 +358,78 @@ class _ReportsScreenState extends State<ReportsScreen> {
             boxShadow: isDark ? [] : [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))]
           ),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center, // İçeriği dikey ortala
             children: [
+              // ÜST KISIM: İsim ve Yüzde
               Row(
                 children: [
                   CircleAvatar(
                     backgroundColor: isHavuz ? Colors.orange.withOpacity(0.2) : Colors.blue.withOpacity(0.2),
-                    radius: 22,
+                    radius: 20, // Biraz küçülttük
                     child: isHavuz 
-                      ? const Icon(Icons.layers, color: Colors.orange, size: 22)
-                      : Text(member.name.isNotEmpty ? member.name[0].toUpperCase() : "?", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 16)),
+                      ? const Icon(Icons.layers, color: Colors.orange, size: 20)
+                      : Text(member.name.isNotEmpty ? member.name[0].toUpperCase() : "?", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 14)),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(member.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
-                        Text(isHavuz ? "Sahipsiz Görevler" : (member.role == 'admin' ? "Yönetici" : "Editör"), style: TextStyle(fontSize: 12, color: subTextColor)),
+                        Text(member.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor), overflow: TextOverflow.ellipsis),
+                        Text(isHavuz ? "Sahipsiz" : (member.role == 'admin' ? "Yönetici" : "Editör"), style: TextStyle(fontSize: 11, color: subTextColor)),
                       ],
                     ),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text("%${(progress * 100).toInt()}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textColor)),
-                      Text("Başarı", style: TextStyle(fontSize: 10, color: subTextColor)),
+                      Text("%${(progress * 100).toInt()}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
                     ],
                   )
                 ],
               ),
-              const SizedBox(height: 12),
+              
+              const Spacer(), // Araya esnek boşluk
+              
+              // PROGRESS BAR
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
                   value: progress,
-                  minHeight: 8,
+                  minHeight: 6,
                   backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                   valueColor: AlwaysStoppedAnimation<Color>(isHavuz ? Colors.orange : (progress == 1.0 ? Colors.green : Colors.blue)),
                 ),
               ),
-              const SizedBox(height: 12),
+              
+              const Spacer(), // Araya esnek boşluk
+
+              // ALT KISIM: İstatistik Kutucukları
               Row(
                 children: [
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                       decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
                       child: Row(
                         children: [
-                          const Icon(Icons.hourglass_empty, size: 16, color: Colors.orange),
-                          const SizedBox(width: 8),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text("Aktif", style: TextStyle(fontSize: 10, color: Colors.orange, fontWeight: FontWeight.bold)),
-                              Text("$active", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textColor)),
-                            ],
-                          )
+                          const Icon(Icons.hourglass_empty, size: 14, color: Colors.orange),
+                          const SizedBox(width: 6),
+                          Text("Aktif: $active", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor)),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                       decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
                       child: Row(
                         children: [
-                          const Icon(Icons.check_circle, size: 16, color: Colors.green),
-                          const SizedBox(width: 8),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text("Biten", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
-                              Text("$completed", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textColor)),
-                            ],
-                          )
+                          const Icon(Icons.check_circle, size: 14, color: Colors.green),
+                          const SizedBox(width: 6),
+                          Text("Biten: $completed", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor)),
                         ],
                       ),
                     ),

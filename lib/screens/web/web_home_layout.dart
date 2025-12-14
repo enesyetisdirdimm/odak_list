@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:excel/excel.dart' hide Border, TextSpan;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:odak_list/models/task.dart';
 import 'package:odak_list/models/project.dart';
@@ -6,8 +10,16 @@ import 'package:odak_list/screens/settings_screen.dart';
 import 'package:odak_list/task_provider.dart';
 import 'package:odak_list/theme_provider.dart';
 import 'package:odak_list/utils/app_colors.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:odak_list/services/database_service.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:table_calendar/table_calendar.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:open_filex/open_filex.dart'; // Dosyayı açmak için
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:universal_html/html.dart' as html;
 
 // --- SIRALAMA SEÇENEKLERİ (MANUEL EKLENDİ) ---
 enum SortOption { manual, newestFirst, dateAsc, dateDesc, priorityDesc, priorityAsc, titleAsc }
@@ -25,6 +37,10 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
   String? _selectedProjectId; 
   bool _showOnlyMyTasks = false; 
   bool _isSidebarOpen = true; 
+
+  bool _isCalendarView = false; // Takvim açık mı?
+  DateTime _focusedDay = DateTime.now(); // Takvimde hangi gündeyiz?
+  DateTime? _selectedDay;
   
   // Arama ve Sıralama Durumları
   String _searchQuery = '';
@@ -40,6 +56,12 @@ class _WebHomeLayoutState extends State<WebHomeLayout> with SingleTickerProvider
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) { // Animasyon bitince çalışsın
+        setState(() {});
+      }
+    });
   }
 
   @override
@@ -255,14 +277,54 @@ void _runSorting(List<Task> tasks) {
                       const SizedBox(height: 10),
 
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Column(
-                          children: [
-                            _buildSidebarItem(icon: Icons.dashboard_outlined, title: "Genel Bakış", count: taskProvider.tasks.length, isSelected: _selectedProjectId == null && !_showOnlyMyTasks, onTap: () => setState(() { _selectedProjectId = null; _showOnlyMyTasks = false; }), theme: themeProvider),
-                            _buildSidebarItem(icon: Icons.account_circle_outlined, title: "Bana Atananlar", count: taskProvider.tasks.where((t) => t.assignedMemberId == taskProvider.currentMember?.id).length, isSelected: _showOnlyMyTasks, onTap: () => setState(() { _selectedProjectId = null; _showOnlyMyTasks = true; }), theme: themeProvider),
-                          ],
-                        ),
-                      ),
+  padding: const EdgeInsets.symmetric(horizontal: 16),
+  child: Column(
+    children: [
+      _buildSidebarItem(
+        icon: Icons.dashboard_outlined, 
+        title: "Genel Bakış", 
+        // Tüm görevlerin sayısı
+        activeCount: taskProvider.tasks.where((t) => !t.isDone).length,
+        totalCount: taskProvider.tasks.length,
+        isSelected: _selectedProjectId == null && !_showOnlyMyTasks && !_isCalendarView,
+        onTap: () => setState(() { _selectedProjectId = null; _showOnlyMyTasks = false; _isCalendarView = false;}), 
+        theme: themeProvider
+      ),
+      _buildSidebarItem(
+        icon: Icons.account_circle_outlined, 
+        title: "Bana Atananlar", 
+        // Bana atananların sayısı
+        activeCount: taskProvider.tasks.where((t) => t.assignedMemberId == taskProvider.currentMember?.id && !t.isDone).length,
+        totalCount: taskProvider.tasks.where((t) => t.assignedMemberId == taskProvider.currentMember?.id).length,
+        isSelected: _showOnlyMyTasks && !_isCalendarView,
+        onTap: () => setState(() { _selectedProjectId = null; _showOnlyMyTasks = true; _isCalendarView = false;}), 
+        theme: themeProvider
+      ),
+
+      _buildSidebarItem(
+  icon: Icons.calendar_month_outlined, 
+  title: "Takvim", 
+  // O günün görev sayısı (isteğe bağlı)
+  activeCount: 0, 
+  totalCount: 0, 
+  isSelected: _isCalendarView, // Seçili mi?
+  theme: themeProvider,
+  onTap: () => setState(() { 
+    _isCalendarView = true; // Takvimi aç
+    _selectedProjectId = null; // Projeyi boşalt
+    _selectedTask = null; // Detayı kapat
+  }), 
+  trailing: const SizedBox(), // Sayı göstermesin, sade dursun
+),
+
+// Araya şık bir çizgi atalım
+Padding(
+  padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+  child: Divider(height: 1, color: Colors.grey.withOpacity(0.2)),
+),
+    ],
+  ),
+),
                       
                       Padding(
                         padding: const EdgeInsets.fromLTRB(24, 30, 20, 10),
@@ -281,26 +343,42 @@ void _runSorting(List<Task> tasks) {
                       ),
                       
                       Expanded(
-                        child: ListView.builder(
-                          controller: _projectScrollController,
-                          itemCount: taskProvider.projects.length,
-                          itemBuilder: (context, index) {
-                            final project = taskProvider.projects[index];
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: _buildSidebarItem(
-                                icon: Icons.circle, iconColor: Color(project.colorValue), title: project.title, count: project.taskCount, isSelected: _selectedProjectId == project.id, theme: themeProvider,
-                                onTap: () => setState(() { _selectedProjectId = project.id; _showOnlyMyTasks = false; }),
-                                trailing: (taskProvider.isAdmin && _selectedProjectId == project.id) ? IconButton(icon: const Icon(Icons.more_horiz, size: 18), onPressed: () {
-                                   final otherProjects = taskProvider.projects.where((p) => p.id != project.id).toList();
-                                   final projectTasksCount = taskProvider.tasks.where((t) => t.projectId == project.id).length;
-                                   if (otherProjects.isNotEmpty && projectTasksCount > 0) { _showTransferDialog(project, otherProjects, taskProvider); } else { _confirmProjectDelete(project, taskProvider, projectTasksCount, taskProvider.tasks, themeProvider); }
-                                }) : null
-                              ),
-                            );
-                          },
-                        ),
-                      ),
+  child: ListView.builder(
+    controller: _projectScrollController,
+    itemCount: taskProvider.projects.length,
+    itemBuilder: (context, index) {
+      final project = taskProvider.projects[index];
+      
+      // --- HESAPLAMA EKLENDİ ---
+      // Bu projeye ait görevleri bul
+      final projectTasks = taskProvider.tasks.where((t) => t.projectId == project.id).toList();
+      final pActive = projectTasks.where((t) => !t.isDone).length;
+      final pTotal = projectTasks.length;
+      // -------------------------
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _buildSidebarItem(
+          icon: Icons.circle, 
+          iconColor: Color(project.colorValue), 
+          title: project.title, 
+          
+          // --- BURASI GÜNCELLENDİ ---
+          activeCount: pActive,
+          totalCount: pTotal,
+          // --------------------------
+
+          isSelected: _selectedProjectId == project.id, 
+          theme: themeProvider,
+          onTap: () => setState(() { _selectedProjectId = project.id; _showOnlyMyTasks = false; }),
+          trailing: (taskProvider.isAdmin && _selectedProjectId == project.id) 
+            ? IconButton(icon: const Icon(Icons.more_horiz, size: 18), onPressed: () { /* Silme kodları aynı kalsın... */ }) 
+            : null
+        ),
+      );
+    },
+  ),
+),
                       const Divider(height: 1), 
                       _buildUserProfileTile(context, taskProvider, themeProvider, isDark)
                     ],
@@ -338,6 +416,24 @@ void _runSorting(List<Task> tasks) {
                             ],
                           ),
                         ),
+
+                        IconButton(
+  icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+  tooltip: "PDF İndir",
+  onPressed: _exportProjectToPdf, // Fonksiyonu çağır
+),
+const SizedBox(width: 10),
+
+// --- YENİ EXCEL BUTONU (Hemen yanına) ---
+const SizedBox(width: 8), // Araya az boşluk
+IconButton(
+  icon: const Icon(Icons.table_view, color: Colors.green), // Excel rengi yeşil
+  tooltip: "Excel İndir",
+  onPressed: _exportProjectToExcel, // Fonksiyonu çağır
+),
+// ----------------------------------------
+
+const SizedBox(width: 10),
                         FilledButton.icon(
                           onPressed: () => _showAddTaskDialog(context), 
                           icon: const Icon(Icons.add, size: 18), 
@@ -428,7 +524,13 @@ void _runSorting(List<Task> tasks) {
                       indicatorColor: themeProvider.secondaryColor,
                       indicatorSize: TabBarIndicatorSize.label,
                       dividerColor: Colors.transparent,
-                      tabs: [Tab(text: "Yapılacaklar"), Tab(text: "Tamamlananlar")],
+                      tabs: [
+      // activeTasks.length yukarıda zaten hesaplanmıştı
+      Tab(text: "Yapılacaklar (${activeTasks.length})"), 
+      
+      // completedTasks.length yukarıda zaten hesaplanmıştı
+      Tab(text: "Tamamlananlar (${completedTasks.length})"),
+    ],
                     ),
                   ),
 
@@ -436,14 +538,20 @@ void _runSorting(List<Task> tasks) {
 
                   // LİSTELER
                   Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildTaskList(activeTasks, themeProvider, taskProvider, context, isDark),
-                        _buildTaskList(completedTasks, themeProvider, taskProvider, context, isDark),
-                      ],
-                    ),
-                  ),
+  child: _isCalendarView
+    ? _buildCalendarView(
+        _tabController.index == 0 ? activeTasks : completedTasks, 
+        themeProvider, 
+        isDark
+      )// YENİ TAKVİM
+    : TabBarView( // ESKİ LİSTE GÖRÜNÜMÜ
+        controller: _tabController,
+        children: [
+          _buildTaskList(activeTasks, themeProvider, taskProvider, context, isDark),
+          _buildTaskList(completedTasks, themeProvider, taskProvider, context, isDark),
+        ],
+      ),
+),
                 ],
               ),
             ),
@@ -638,6 +746,9 @@ void _runSorting(List<Task> tasks) {
                     children: [
                       _buildMetaRow(Icons.edit, "Oluşturan: $creatorName", Colors.grey),
                       _buildMetaRow(Icons.person, "Atanan: $assigneeName", task.assignedMemberId == null ? Colors.orange : themeProvider.secondaryColor),
+                      if (task.lastCommentAt != null)
+                      _buildMetaRow(Icons.chat_bubble_outline, "Yorum var", themeProvider.secondaryColor),
+                      
                       if (task.isDone && completedBy != null)
                          _buildMetaRow(Icons.check_circle, "Bitiren: $completedBy", Colors.green),
                     ],
@@ -673,21 +784,68 @@ void _runSorting(List<Task> tasks) {
     );
   }
 
-  Widget _buildSidebarItem({required IconData icon, required String title, required int count, required bool isSelected, required VoidCallback onTap, required ThemeProvider theme, Color? iconColor, Widget? trailing}) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      decoration: BoxDecoration(
-        color: isSelected ? theme.secondaryColor.withOpacity(0.1) : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
+Widget _buildSidebarItem({
+  required IconData icon,
+  required String title,
+  // required int count, // <-- ESKİSİNİ SİL
+  required int activeCount, // <-- YENİ
+  required int totalCount,  // <-- YENİ
+  required bool isSelected,
+  required VoidCallback onTap,
+  required ThemeProvider theme,
+  Color? iconColor,
+  Widget? trailing
+}) {
+  return Container(
+    margin: const EdgeInsets.symmetric(vertical: 2),
+    decoration: BoxDecoration(
+      color: isSelected ? theme.secondaryColor.withOpacity(0.1) : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: ListTile(
+      leading: Icon(icon, color: iconColor ?? (isSelected ? theme.secondaryColor : Colors.grey.shade600), size: 20),
+      title: Text(title, style: TextStyle(fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500, fontSize: 13, color: isSelected ? theme.secondaryColor : Colors.grey.shade700)),
+      
+      // --- BURASI DEĞİŞTİ ---
+      trailing: trailing ?? Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? theme.secondaryColor.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(6)
+        ),
+        child: RichText(
+          text: TextSpan(
+            children: [
+              // Aktif Sayı (Renkli ve Kalın)
+              TextSpan(
+                text: "$activeCount", 
+                style: TextStyle(
+                  fontSize: 11, 
+                  fontWeight: FontWeight.bold, 
+                  color: isSelected ? theme.secondaryColor : (activeCount > 0 ? theme.primaryColor : Colors.grey)
+                )
+              ),
+              // Bölü Çizgisi ve Toplam (Gri ve İnce)
+              TextSpan(
+                text: " / $totalCount", 
+                style: TextStyle(
+                  fontSize: 10, 
+                  color: isSelected ? theme.secondaryColor.withOpacity(0.7) : Colors.grey
+                )
+              ),
+            ]
+          )
+        ),
       ),
-      child: ListTile(
-        leading: Icon(icon, color: iconColor ?? (isSelected ? theme.secondaryColor : Colors.grey.shade600), size: 20),
-        title: Text(title, style: TextStyle(fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500, fontSize: 13, color: isSelected ? theme.secondaryColor : Colors.grey.shade700)),
-        trailing: trailing ?? (count > 0 ? Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: isSelected ? theme.secondaryColor : Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(4)), child: Text("$count", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isSelected ? Colors.white : Colors.grey.shade600))) : null),
-        onTap: onTap, dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
-  }
+      // ----------------------
+
+      onTap: onTap, 
+      dense: true, 
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0), 
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
+  );
+}
   
   Widget _buildUserProfileTile(BuildContext context, TaskProvider provider, ThemeProvider theme, bool isDark) {
     final member = provider.currentMember; final name = member?.name ?? "Misafir"; final initial = name.isNotEmpty ? name[0].toUpperCase() : "M";
@@ -715,5 +873,374 @@ void _runSorting(List<Task> tasks) {
         ),
       ),
     );
+  }
+
+  Widget _buildCalendarView(List<Task> allTasks, ThemeProvider theme, bool isDark) {
+    final calendarBgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final calendarTextColor = isDark ? Colors.white : Colors.black87;
+
+    return Container(
+      color: calendarBgColor,
+      child: Column(
+        children: [
+          TableCalendar(
+            locale: 'tr_TR', 
+            firstDay: DateTime.utc(2023, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDay,
+            currentDay: DateTime.now(),
+            calendarFormat: CalendarFormat.month,
+            startingDayOfWeek: StartingDayOfWeek.monday,
+            
+            headerStyle: HeaderStyle(
+              titleCentered: true,
+              formatButtonVisible: false, 
+              titleTextStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: calendarTextColor),
+              leftChevronIcon: Icon(Icons.chevron_left, color: theme.secondaryColor),
+              rightChevronIcon: Icon(Icons.chevron_right, color: theme.secondaryColor),
+            ),
+            
+            calendarStyle: CalendarStyle(
+              defaultTextStyle: TextStyle(color: calendarTextColor),
+              weekendTextStyle: const TextStyle(color: Colors.redAccent),
+              todayDecoration: BoxDecoration(color: theme.secondaryColor.withOpacity(0.5), shape: BoxShape.circle),
+              selectedDecoration: BoxDecoration(color: theme.secondaryColor, shape: BoxShape.circle),
+              outsideTextStyle: TextStyle(color: Colors.grey.withOpacity(0.5)),
+            ),
+            
+            // Takvimde sadece YAPILACAKLAR için nokta koy (İstersen burayı da değiştirebilirsin)
+            eventLoader: (day) {
+              return allTasks.where((task) {
+                if (task.dueDate == null) return false;
+                return isSameDay(task.dueDate, day);
+              }).toList();
+            },
+
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            
+            onDaySelected: (selectedDay, focusedDay) {
+              setState(() {
+                _selectedDay = selectedDay;
+                _focusedDay = focusedDay;
+              });
+            },
+            
+            onPageChanged: (focusedDay) {
+              _focusedDay = focusedDay;
+            },
+          ),
+
+          const Divider(),
+          
+          // --- LİSTE KISMI ---
+          Expanded(
+            child: Container(
+              color: isDark ? Colors.transparent : Colors.grey.shade50,
+              child: _selectedDay == null 
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.touch_app, size: 40, color: Colors.grey.withOpacity(0.5)),
+                        const SizedBox(height: 10),
+                        Text("Görevlerini görmek için bir güne tıkla.", style: TextStyle(color: Colors.grey.shade500)),
+                      ],
+                    ),
+                  )
+                : Builder(
+                    builder: (context) {
+                      // BURASI DEĞİŞTİ: Artık tamamlananları gizlemiyoruz!
+                      // Sadece tarihe göre filtreliyoruz.
+                      final dayTasks = allTasks.where((t) => 
+                        t.dueDate != null && 
+                        isSameDay(t.dueDate, _selectedDay)
+                      ).toList();
+
+                      // Sıralama: Tamamlanmayanlar üstte görünsün
+                      dayTasks.sort((a, b) {
+                        if (a.isDone == b.isDone) return 0;
+                        return a.isDone ? 1 : -1; 
+                      });
+
+                      if (dayTasks.isEmpty) {
+                        return Center(child: Text("Bu tarihte planlanmış görev yok.", style: TextStyle(color: Colors.grey.shade500)));
+                      }
+
+                      return ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: dayTasks.length,
+                        itemBuilder: (context, index) {
+                          final task = dayTasks[index];
+                          return Card(
+                            elevation: 1,
+                            color: isDark ? Colors.white10 : Colors.white,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            child: ListTile(
+                              // Checkbox artık çalışacak çünkü taskProvider.tasks gönderdik
+                              leading: Checkbox(
+                                value: task.isDone, 
+                                activeColor: theme.secondaryColor,
+                                onChanged: (val) {
+                                   Provider.of<TaskProvider>(context, listen: false).toggleTaskStatus(task);
+                                }
+                              ),
+                              title: Text(
+                                task.title, 
+                                style: TextStyle(
+                                  decoration: task.isDone ? TextDecoration.lineThrough : null,
+                                  color: task.isDone 
+                                    ? Colors.grey 
+                                    : (isDark ? Colors.white : Colors.black87)
+                                )
+                              ),
+                              subtitle: Text(
+                                task.isDone ? "Tamamlandı" : "Bekliyor",
+                                style: TextStyle(fontSize: 12, color: task.isDone ? Colors.green : Colors.orange),
+                              ),
+                              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                              onTap: () => setState(() => _selectedTask = task),
+                            ),
+                          );
+                        },
+                      );
+                    }
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+ Future<void> _exportProjectToPdf() async {
+    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+    final pdf = pw.Document();
+
+    // 1. FONT YÜKLEME (Hata almamak için assets yöntemi devam ediyor)
+    pw.Font ttf;
+    try {
+      final fontData = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
+      ttf = pw.Font.ttf(fontData);
+    } catch (e) {
+      print("Font hatası: $e");
+      return;
+    }
+
+    // 2. VERİLERİ HAZIRLA VE SIRALA
+    String projectTitle = _selectedProjectId != null 
+        ? taskProvider.projects.firstWhere((p) => p.id == _selectedProjectId).title
+        : "Genel Rapor"; 
+        
+    List<Task> exportTasks = [];
+    if (_selectedProjectId != null) {
+      exportTasks = taskProvider.tasks.where((t) => t.projectId == _selectedProjectId).toList();
+    } else {
+      exportTasks = List.from(taskProvider.tasks); // Listeyi kopyala ki asıl liste bozulmasın
+    }
+
+    // --- SIRALAMA İŞLEMİ (TARİHE GÖRE) ---
+    // Tarihi olmayanlar en sona gitsin, olanlar yakından uzağa sıralansın.
+    exportTasks.sort((a, b) {
+      if (a.dueDate == null && b.dueDate == null) return 0;
+      if (a.dueDate == null) return 1;
+      if (b.dueDate == null) return -1;
+      return a.dueDate!.compareTo(b.dueDate!);
+    });
+    // -------------------------------------
+
+    // 3. PDF TASARIMI
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        // Kenar boşluklarını biraz daraltalım ki tablo sığsın
+        margin: const pw.EdgeInsets.all(20), 
+        theme: pw.ThemeData.withFont(base: ttf, bold: ttf),
+        
+        build: (pw.Context context) {
+          return [
+            // BAŞLIK
+            pw.Header(
+              level: 0,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(projectTitle, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text("Tarih: ${DateTime.now().day}.${DateTime.now().month}.${DateTime.now().year}", style: const pw.TextStyle(fontSize: 10)),
+                      pw.Text("Toplam: ${exportTasks.length} Görev", style: const pw.TextStyle(fontSize: 10)),
+                    ]
+                  )
+                ]
+              )
+            ),
+            pw.SizedBox(height: 10),
+            
+            // TABLO
+            pw.Table.fromTextArray(
+              context: context,
+              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+              
+              // Başlık Stili
+              headerStyle: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+              headerHeight: 25,
+              cellAlignments: {
+                0: pw.Alignment.centerLeft, // Durum
+                1: pw.Alignment.centerLeft, // Görev Adı
+                2: pw.Alignment.center,     // Atanan
+                3: pw.Alignment.center,     // Tarih
+              },
+              
+              // Hücre Stili (Fontu küçülttük ki sığsın)
+              cellStyle: const pw.TextStyle(fontSize: 9),
+              cellPadding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+
+              // --- EN ÖNEMLİ KISIM: SÜTUN GENİŞLİKLERİ ---
+              columnWidths: {
+                0: const pw.FixedColumnWidth(60), // Durum (Sabit küçük)
+                1: const pw.FlexColumnWidth(1),   // Görev Adı (Kalan tüm alanı kapla)
+                2: const pw.FixedColumnWidth(50), // Atanan (İsim sığacak kadar)
+                3: const pw.FixedColumnWidth(40), // Tarih (Tarih sığacak kadar)
+              },
+              // -------------------------------------------
+
+              headers: <String>['Durum', 'Görev Açıklaması', 'Atanan', 'Tarih'],
+              data: exportTasks.map((task) {
+                return [
+                  task.isDone ? "Tamamlandı" : "Bekliyor",
+                  task.title, 
+                  taskProvider.getMemberName(task.assignedMemberId) ?? "-",
+                  task.dueDate != null ? "${task.dueDate!.day}.${task.dueDate!.month}" : "-"
+                ];
+              }).toList(),
+            ),
+          ];
+        },
+      ),
+    );
+
+    final bytes = await pdf.save(); // PDF'i byte verisine çevir
+
+    if (kIsWeb) {
+      // ------------------------------------------------
+      // WEB TARAFINDA İNDİRME
+      // ------------------------------------------------
+      final blob = html.Blob([bytes], 'application/pdf');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement()
+        ..href = url
+        ..style.display = 'none'
+        ..download = '${projectTitle}_Rapor.pdf';
+      html.document.body?.children.add(anchor);
+      anchor.click();
+      html.document.body?.children.remove(anchor);
+      html.Url.revokeObjectUrl(url);
+    } else {
+      // ------------------------------------------------
+      // MOBİL TARAFINDA KAYDET VE PAYLAŞ
+      // ------------------------------------------------
+      try {
+        // 1. Geçici klasörü bul
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/${projectTitle}_Rapor.pdf');
+
+        // 2. Dosyayı yaz
+        await file.writeAsBytes(bytes);
+
+        // 3. Paylaşım Menüsünü Aç (WhatsApp, Mail, Drive vb.)
+        // share_plus paketi kullanılır
+        await Share.shareXFiles(
+          [XFile(file.path)], 
+          text: '$projectTitle Raporu'
+        );
+        
+        // Alternatif: Direkt dosyayı açmak istersen (open_filex paketi ile):
+        // await OpenFilex.open(file.path);
+        
+      } catch (e) {
+        print("Dosya kaydetme hatası: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Hata oluştu: $e"))
+        );
+      }
+    }
+  }
+
+  Future<void> _exportProjectToExcel() async {
+    final taskProvider = Provider.of<TaskProvider>(context, listen: false);
+    
+    // 1. Excel Dosyası Oluştur
+    var excel = Excel.createExcel();
+    
+    // Varsayılan sayfayı al ("Sheet1")
+    Sheet sheetObject = excel['Görev Listesi'];
+    
+    // Varsayılan "Sheet1"i silelim, kendi ismimizi kullanalım (İsteğe bağlı)
+    excel.delete('Sheet1'); 
+
+    // 2. Başlık Stili (Opsiyonel: Kalın yapalım)
+    CellStyle headerStyle = CellStyle(
+      bold: true,
+      fontFamily: getFontFamily(FontFamily.Calibri),
+    );
+
+    // 3. Başlık Satırını Ekle
+    List<String> headers = ['Durum', 'Görev Adı', 'Atanan Kişi', 'Tarih', 'Öncelik'];
+    sheetObject.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+    // 4. Verileri Hazırla ve Sırala (PDF ile Birebir Aynı Mantık)
+    List<Task> exportTasks = [];
+    if (_selectedProjectId != null) {
+      exportTasks = taskProvider.tasks.where((t) => t.projectId == _selectedProjectId).toList();
+    } else {
+      exportTasks = List.from(taskProvider.tasks);
+    }
+
+    // Tarihe göre sırala
+    exportTasks.sort((a, b) {
+      if (a.dueDate == null && b.dueDate == null) return 0;
+      if (a.dueDate == null) return 1;
+      if (b.dueDate == null) return -1;
+      return a.dueDate!.compareTo(b.dueDate!);
+    });
+
+    // 5. Satırları Döngüyle Ekle
+    for (var task in exportTasks) {
+      String status = task.isDone ? "Tamamlandı" : "Bekliyor";
+      String assignee = task.assignedMemberId != null 
+          ? (taskProvider.getMemberName(task.assignedMemberId) ?? "-") 
+          : "Havuz";
+      String date = task.dueDate != null 
+          ? "${task.dueDate!.day}.${task.dueDate!.month}.${task.dueDate!.year}" 
+          : "-";
+      
+      // Öncelik metni
+      String priority = task.priority == 3 ? "Yüksek" : (task.priority == 2 ? "Orta" : "Düşük");
+
+      sheetObject.appendRow([
+        TextCellValue(status),
+        TextCellValue(task.title),
+        TextCellValue(assignee),
+        TextCellValue(date),
+        TextCellValue(priority),
+      ]);
+    }
+
+    // 6. Dosyayı İndir (WEB İÇİN ÖZEL KOD)
+    // Excel paketinden byte verisini al
+    var fileBytes = excel.save();
+    
+    if (fileBytes != null) {
+      // Tarayıcıda indirme tetikle
+      final blob = html.Blob([fileBytes]);
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: url)
+        ..setAttribute("download", "Gorev_Raporu.xlsx")
+        ..click();
+      html.Url.revokeObjectUrl(url);
+    }
   }
 }
